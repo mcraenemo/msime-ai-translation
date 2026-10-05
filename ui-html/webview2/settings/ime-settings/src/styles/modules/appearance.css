@@ -1,0 +1,260 @@
+/********/
+/* 外观 */
+/********/
+.sec-candidate-preview {
+}
+
+.s-h-cand-preview {
+  /* display: flex;
+  flex-direction: row; */
+}
+
+.cand-preview {
+  min-height: 16rem;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  overflow: visible;
+}
+.cand-preview.has-skin-decoration {
+  min-height: 22rem;
+  padding: 16px;
+}
+.cand-preview .candidate {
+  margin-top: 0;
+}
+
+.candidate {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--cand-font-family, inherit);
+  font-size: var(--cand-font-size, inherit);
+}
+
+.cand-preview .candidate,
+.cand-preview .candidate .container,
+.cand-preview .candidate .text,
+.cand-preview .candidate .cand-content,
+.cand-preview .candidate .cand-helpcode,
+.cand-preview .candidate .num,
+.cand-preview .candidate .cand-no,
+.cand-preview .candidate .pinyin {
+  font-family: var(--cand-font-family, inherit) !important;
+  font-size: var(--cand-font-size, inherit);
+}
+
+.cand-preview .candidate .num,
+.cand-preview .candidate .cand-no {
+  font-size: 0.8em;
+}
+
+.cand-preview .candidate .pinyin,
+.cand-preview .candidate .pinyin .text,
+.cand-preview .candidate .pinyin .hidden-pinyin {
+  font-size: var(--preedit-font-size, var(--cand-font-size, inherit));
+}
+
+.cand-preview .cand-helpcode[hidden] {
+  display: none !important;
+}
+
+.cand-preview .candidate .container.preedit-hidden > .row.pinyin {
+  display: none;
+}
+
+.cand-color-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cand-color-control input[type="color"] {
+  width: 36px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--control-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cand-color-reset {
+  border: 1px solid var(--control-border);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-text);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cand-color-reset:hover {
+  background: var(--button-secondary-hover);
+}
+
+.cand-color-reset.is-active {
+  border-color: var(--accent-soft-border);
+  background: var(--accent-soft);
+  color: var(--text-color);
+}
+
+/**/
+/* 界面渲染 */
+/**/
+/* 两个选项的文字宽度不同，按钮得有个固定宽度，否则切换渲染方式时按钮会跟着变宽变窄。
+   宽度按最长的 "WebView2" 来定，只比它的自然宽度多留一点余量。 */
+#uiBackendBtn {
+  min-width: 120px;
+}
+
+/* 弹出菜单跟按钮一样宽：.dropdown 由按钮撑开，左右都贴住即可（同 .font-dropdown-menu）。 */
+#uiBackendMenu {
+  left: 0;
+  right: 0;
+  min-width: 0;
+}
+
+/**/
+/* 设置窗口后台驻留：同上，按最长的“关闭后立即退出”定宽，菜单与按钮等宽 */
+/**/
+#settingsLingerBtn {
+  min-width: 150px;
+}
+
+#settingsLingerMenu {
+  left: 0;
+  right: 0;
+  min-width: 0;
+}
+
+/**/
+/* 重启输入法进程 */
+/**/
+.restart-server-button {
+  min-width: 100px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--dropdown-bg);
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.restart-server-button:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+}
+
+.restart-server-button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+/**/
+/* 主题模式 */
+/**/
+.theme .ftb-toggle {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.theme-toggle-header {
+  margin-bottom: 0;
+}
+
+.theme-surface-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-surface-chevron {
+  width: 7px;
+  height: 7px;
+  margin-top: -3px;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  transition: transform 0.16s ease, margin 0.16s ease;
+}
+
+.theme-surface-expand[aria-expanded="true"] .theme-surface-chevron {
+  margin-top: 3px;
+  transform: rotate(225deg);
+}
+
+.theme-surface-details {
+  display: none;
+  margin: 4px 0 0 18px;
+}
+
+.theme-surface-details.open {
+  display: block;
+}
+
+.theme-surface-details .section-header {
+  min-height: 38px;
+  padding: 2px 0;
+}
+
+.theme-surface-details .divider {
+  display: none;
+}
+
+.arrange-item {
+  margin-top: 12px;
+}
+
+.fallback-font-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.fallback-font-select {
+  width: 150px;
+}
+.fallback-font-select > .font-search-input {
+  flex: 1;
+  width: 0;
+  text-overflow: ellipsis;
+}
+.fallback-font-select > img {
+  flex-shrink: 0;
+}
+.fallback-font-menu {
+  left: 0;
+  right: auto;
+  min-width: 168px;
+  width: max-content;
+  max-width: min(320px, 80vw);
+}
+.fallback-font-add {
+  width: 50px;
+  justify-content: center;
+  padding-right: 12px;
+}
+.fallback-font-add > span {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+}
+.fallback-font-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

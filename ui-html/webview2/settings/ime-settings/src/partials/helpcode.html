@@ -1,0 +1,114 @@
+<div class="content" id="helpcode-settings">
+  <div class="content-header"><span>辅助码</span></div>
+
+  <!-- 双拼辅助码 -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">双拼辅助码</div>
+      <div class="ftb-toggle-btn" id="shuangpinHelpcodeToggleBtn">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header section-header-shuangpin-helpcode">
+      <div class="section-title">双拼辅助码方案</div>
+      <div class="dropdown">
+        <button class="dropdown-toggle dropdown-toggle-shuangpin-helpcode-scheme" id="shuangpinHelpcodeSchemeBtn">
+          <span>蓝天小雨点</span>
+          <img class="shuangpin-scheme-arrow" src="./assets/arrow.svg" alt="▼">
+        </button>
+        <div class="dropdown-menu dropdown-menu-shuangpin-helpcode-scheme" id="shuangpinHelpcodeSchemeMenu">
+          <div class="dropdown-item" data-value="lantian">蓝天小雨点</div>
+          <div class="dropdown-item" data-value="ziranma">自然码</div>
+          <div class="dropdown-item" data-value="shouyou2_0">首右2.0</div>
+          <div class="dropdown-item" data-value="shouyouplus">首右plus</div>
+          <div class="dropdown-item" data-value="xiaohe">小鹤</div>
+          <div class="dropdown-item" data-value="jiajia">拼音加加</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-header section-header-shuangpin-helpcode">
+      <div class="section-title">在候选窗口中显示双拼辅助码</div>
+      <div class="ftb-toggle-btn" id="showShuangpinHelpcodeToggleBtn">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <!-- 句中辅助码：完整音节后敲触发键（` 或 ;），接着的字母筛这个音节上的字，第二码用大写 -->
+    <div class="section-header section-header-shuangpin-helpcode">
+      <div class="section-title" title="在完整音节后敲触发键（如反引号 `），接着的字母筛这个音节上的字（如 ulpb`x），第二码用大写才参与筛选（如 ulpb`xY），之后可以接着打。整句候选会带着锁住的字重新打分">句中辅助码</div>
+      <div class="ftb-toggle-btn" id="midSentenceHelpcodeToggleBtn">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+    <div class="section-header section-header-shuangpin-helpcode">
+      <div class="section-title">句中辅助码触发键</div>
+    </div>
+    <div class="content-page-option">
+      <label class="check-option"><input type="checkbox" name="mid-sentence-helpcode-trigger" id="midSentenceHelpcodeBacktickCheckbox" value="backtick" checked><span>` 反引号</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" name="mid-sentence-helpcode-trigger" id="midSentenceHelpcodeSemicolonCheckbox" value="semicolon"><span>; 分号</span></label>
+      <div class="input-setting-description">至少保留一个。分号在微软、搜狗、紫光双拼里也是 ing 韵母，只有在完整音节后才当触发键；按下后预编辑里同样显示为 `</div>
+    </div>
+  </div>
+
+  <!-- 全拼辅助码 -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-title">全拼辅助码</div>
+      <div class="ftb-toggle-btn" id="quanpinHelpcodeToggleBtn">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header section-header-quanpin-helpcode">
+      <div class="section-title">全拼辅助码方案</div>
+      <div class="dropdown">
+        <button class="dropdown-toggle dropdown-toggle-quanpin-helpcode-scheme" id="quanpinHelpcodeSchemeBtn">
+          <span>蓝天小雨点</span>
+          <img class="shuangpin-scheme-arrow" src="./assets/arrow.svg" alt="▼">
+        </button>
+        <div class="dropdown-menu dropdown-menu-quanpin-helpcode-scheme" id="quanpinHelpcodeSchemeMenu">
+          <div class="dropdown-item" data-value="lantian">蓝天小雨点</div>
+          <div class="dropdown-item" data-value="ziranma">自然码</div>
+          <div class="dropdown-item" data-value="shouyou2_0">首右2.0</div>
+          <div class="dropdown-item" data-value="shouyouplus">首右plus</div>
+          <div class="dropdown-item" data-value="xiaohe">小鹤</div>
+          <div class="dropdown-item" data-value="jiajia">拼音加加</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-header section-header-quanpin-helpcode">
+      <div class="section-title">在候选窗口中显示全拼辅助码</div>
+      <div class="ftb-toggle-btn" id="showQuanpinHelpcodeToggleBtn">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+  </div>
+  <!-- 自定义辅助码 -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title">自定义辅助码</div>
+        <div class="helpcode-description">
+          把 UTF-8 编码的 <code>.txt</code> 辅助码文件放进下面的文件夹，点击“刷新方案”后即可在上方方案中选择。
+          每行写作 <code>字=辅助码</code>；设置中默认按文件名显示，可在文件开头用
+          <code># name: 中文名</code> 和 <code># name_en: English name</code> 注释指定方案名称。修改正在使用的方案文件后，需要切换一次方案或重启输入法才会生效。
+        </div>
+        <div class="helpcode-description helpcode-custom-directory" id="customHelpcodeDirectory"></div>
+      </div>
+      <div class="helpcode-custom-actions">
+        <button type="button" class="helpcode-custom-button" id="openCustomHelpcodeDirectory">打开目录</button>
+        <button type="button" class="helpcode-custom-button" id="refreshCustomHelpcodes">刷新方案</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="helpcodeToast" class="dict-toast" role="status" aria-live="polite">
+    <div id="helpcodeToastIcon" class="dict-toast-icon" aria-hidden="true"></div>
+    <div id="helpcodeToastMessage" class="dict-toast-message"></div>
+    <button id="helpcodeToastClose" class="dict-toast-close" type="button" aria-label="关闭通知">×</button>
+  </div>
+</div>

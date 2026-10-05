@@ -1,0 +1,73 @@
+/* 候选框翻页箭头的预览，尺寸与 ui-html/webview2/candwnd 里的候选页一致。
+   预览宿主 .candidate 带 .page-arrows-on 时才显示，由 skin.ts 按当前皮肤的 page_arrows 切换。 */
+/* 关闭时一定要藏住：有的皮肤给 .row.cand 写了更高特异度的 display。 */
+.candidate .page-arrows-row,
+.candidate .page-arrows {
+  display: none !important;
+}
+
+.candidate.page-arrows-on.wnd-v .page-arrows-row {
+  display: block !important;
+}
+
+/* 竖排：最后一行下面的一矮行。借用候选行的 .row.cand / .text 左内边距，“‹”的左端与序号对齐；
+   行高、上下内边距和高亮底色都去掉，只剩箭头本身的高度。 */
+.candidate.page-arrows-on.wnd-v .page-arrows-row {
+  margin-top: -1px !important;
+  margin-bottom: 1px;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  background: none !important;
+  /* 预览不响应鼠标，也就不会被候选行的悬停底色选中。 */
+  pointer-events: none;
+}
+
+.candidate.page-arrows-on.wnd-v .page-arrows-row::before {
+  display: none;
+}
+
+.candidate.page-arrows-on.wnd-v .page-arrows-row .text {
+  line-height: 0;
+}
+
+.candidate.page-arrows-on.wnd-v .page-arrows {
+  display: inline-flex !important;
+  gap: 1px;
+  margin-left: -0.22em;
+}
+
+/* 横排：候选后面的一小列，贴着最后一行。 */
+.candidate.page-arrows-on.wnd-h .page-arrows {
+  display: inline-flex !important;
+  gap: 1px;
+  vertical-align: bottom;
+  margin: 0 1px 0.25em 2px;
+}
+
+.candidate .page-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.72em;
+  height: 0.9em;
+  border-radius: 3px;
+  color: var(--cand-num, var(--cand-text));
+}
+
+.candidate .page-arrow::before {
+  content: "";
+  width: 0.28em;
+  height: 0.28em;
+  box-sizing: border-box;
+  border: solid currentColor;
+  border-width: 0 0 max(1.2px, 0.075em) max(1.2px, 0.075em);
+  transform: translateX(0.07em) rotate(45deg);
+}
+
+.candidate .page-arrow-next::before {
+  transform: translateX(-0.07em) rotate(-135deg);
+}
+
+.candidate .page-arrow.disabled {
+  opacity: 0.3;
+}

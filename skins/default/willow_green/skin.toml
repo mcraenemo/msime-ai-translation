@@ -1,0 +1,9 @@
+# 内置皮肤「杨柳青」的设置清单。外观由输入法内置的样式决定，这里只放皮肤级的开关；
+# 基于 willow_green 的外部皮肤没写的开关沿用这里的值。
+schema_version = 1
+id = "willow_green"
+name = "杨柳青 Willow green"
+
+[candidate_window]
+# 候选框里的翻页箭头（默认关闭）：横排在候选右侧、贴着最后一行，竖排在最后一行下方、与序号左对齐
+page_arrows = false

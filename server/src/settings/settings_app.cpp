@@ -1,0 +1,2265 @@
+#include "ai/translation_sync.h"
+#include "engine/contracts/webview/validator.h"
+#include "config/ime_config.h"
+#include "engine/core/data_path.h"
+#include "global/globals.h"
+#include "resource/resource.h"
+#include "settings/settings_launcher.h"
+#include "settings/api_credential_test.h"
+#include "settings/collocation_model.h"
+#include "settings/settings_splash.h"
+#include "settings/dictionary_manager.h"
+#include "settings/serial_task_queue.h"
+#include "statistics/stats_overview.h"
+#include "statistics/stats_store.h"
+#include <chrono>
+#include <future>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include "skin/candidate_skin_catalog.h"
+#include "utils/common_utils.h"
+#include "utils/single_instance.h"
+#include "voice-input/voice_providers.h"
+
+#include <WebView2.h>
+#include <WebView2EnvironmentOptions.h>
+#include <WebView2EnvironmentOptions.h>
+#include <boost/json.hpp>
+#include <dcomp.h>
+#include <dwmapi.h>
+#include <nlohmann/json.hpp>
+#include <wil/com.h>
+#include <windows.h>
+#include <windowsx.h>
+#include <shellapi.h>
+#include <wrl.h>
+
+#include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+
+#pragma comment(lib, "dcomp.lib")
+#pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "shell32.lib")
+
+using Microsoft::WRL::Callback;
+using Microsoft::WRL::ComPtr;
+using Microsoft::WRL::Make;
+namespace json = boost::json;
+
+namespace
+{
+constexpr wchar_t kWindowClass[] = L"MetasequoiaImeSettingsWindow";
+constexpr wchar_t kWindowTitle[] = L"Metasequoia IME Settings";
+constexpr wchar_t kSingleInstanceMutex[] = L"Local\\MetasequoiaImeSettings.SingleInstance";
+constexpr UINT kActivateExistingWindow = WM_APP + 1;
+constexpr UINT kOpenAboutSection = WM_APP + 2;
+constexpr UINT kScanSkinCatalog = WM_APP + 3;
+constexpr UINT kWorkerCompleted = WM_APP + 4;
+constexpr UINT kQuitSettings = WM_APP + 5;
+constexpr UINT_PTR kConfigReloadTimer = 1;
+constexpr UINT_PTR kLingerTimer = 2;
+
+ComPtr<ICoreWebView2Controller> g_controller;
+ComPtr<ICoreWebView2CompositionController> g_composition_controller;
+ComPtr<ICoreWebView2> g_webview;
+ComPtr<ICoreWebView2_3> g_webview3;
+ComPtr<ICoreWebView2Controller2> g_controller2;
+ComPtr<IDCompositionDevice> g_dcomp_device;
+ComPtr<IDCompositionTarget> g_dcomp_target;
+ComPtr<IDCompositionVisual> g_dcomp_root;
+RECT g_maximize_button_rect{};
+bool g_has_maximize_button_rect = false;
+bool g_maximize_button_hover = false;
+bool g_window_active = true;
+bool g_window_minimized = false;
+bool g_open_about_on_ready = false;
+bool g_webview_content_started = false;
+HWND g_settings_hwnd = nullptr;
+std::optional<CandidateSkinCatalog::ScanResult> g_candidate_skin_catalog;
+uint64_t g_candidate_skin_catalog_revision = 0;
+std::unique_ptr<SerialTaskQueue> g_worker;
+bool g_closing = false;
+bool g_lingering = false;
+bool g_reload_pending = false;
+bool g_settings_light = false;
+// appearance.settings_window_linger 的 UI 线程副本，由 ConfigCompletion 更新。
+std::string g_settings_window_linger = "off";
+std::wstring g_last_config_message;
+bool g_worker_com_initialized = false; // worker-only
+void CloseSettings(HWND hwnd);
+void HideSettings(HWND hwnd);
+
+// 冷启动打点：设置 METASEQUOIA_IME_SETTINGS_TRACE=1 后，各阶段距进程启动的毫秒数追加到
+// %TEMP%\metasequoia-settings-startup.log。UI 线程和 worker 都会调用。
+void TraceStartup(const char *stage)
+{
+    static const bool enabled = [] {
+        wchar_t value[8]{};
+        return GetEnvironmentVariableW(L"METASEQUOIA_IME_SETTINGS_TRACE", value, 8) > 0 && value[0] == L'1';
+    }();
+    if (!enabled)
+        return;
+    static const LONGLONG start = [] {
+        FILETIME creation{}, exit{}, kernel{}, user{};
+        GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user);
+        return static_cast<LONGLONG>((static_cast<ULONGLONG>(creation.dwHighDateTime) << 32) | creation.dwLowDateTime);
+    }();
+    FILETIME now_ft{};
+    GetSystemTimePreciseAsFileTime(&now_ft);
+    const LONGLONG now =
+        static_cast<LONGLONG>((static_cast<ULONGLONG>(now_ft.dwHighDateTime) << 32) | now_ft.dwLowDateTime);
+    static std::mutex mutex;
+    std::lock_guard lock(mutex);
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH, temp);
+    const std::filesystem::path path = std::filesystem::path(temp) / L"metasequoia-settings-startup.log";
+    FILE *file = nullptr;
+    if (_wfopen_s(&file, path.c_str(), L"a") == 0 && file)
+    {
+        fprintf(file, "%lu %8.1f ms  %s\n", GetCurrentProcessId(), static_cast<double>(now - start) / 10000.0, stage);
+        fclose(file);
+    }
+}
+
+nlohmann::json CandidateColorsToJson(const CandidateSkinCatalog::CandidateColors &colors)
+{
+    nlohmann::json json = nlohmann::json::object();
+    if (!colors.accent.empty())
+        json["accent"] = colors.accent;
+    if (!colors.selected.empty())
+        json["selected"] = colors.selected;
+    if (!colors.hover.empty())
+        json["hover"] = colors.hover;
+    if (!colors.surface.empty())
+        json["surface"] = colors.surface;
+    if (!colors.border.empty())
+        json["border"] = colors.border;
+    if (!colors.text.empty())
+        json["text"] = colors.text;
+    if (!colors.number.empty())
+        json["number"] = colors.number;
+    if (!colors.translation.empty())
+        json["translation"] = colors.translation;
+    if (colors.showSelectedBar.has_value())
+        json["showSelectedBar"] = *colors.showSelectedBar;
+    const std::pair<const char *, const std::string *> optional[] = {
+        {"candidateText", &colors.candidateText},   {"preeditText", &colors.preeditText},
+        {"preeditCaret", &colors.preeditCaret},     {"selectedText", &colors.selectedText},
+        {"selectedNumber", &colors.selectedNumber}, {"selectedTranslation", &colors.selectedTranslation},
+        {"selectedBar", &colors.selectedBar},       {"preeditBackground", &colors.preeditBackground},
+        {"preeditDivider", &colors.preeditDivider},
+    };
+    for (const auto &[key, value] : optional)
+    {
+        if (!value->empty())
+            json[key] = *value;
+    }
+    nlohmann::json menu = nlohmann::json::object();
+    if (!colors.menuBackground.empty())
+        menu["background"] = colors.menuBackground;
+    if (!colors.menuBorder.empty())
+        menu["border"] = colors.menuBorder;
+    if (!colors.menuText.empty())
+        menu["text"] = colors.menuText;
+    if (!colors.menuHover.empty())
+        menu["hover"] = colors.menuHover;
+    if (!menu.empty())
+        json["menu"] = std::move(menu);
+    return json;
+}
+
+nlohmann::json ToolbarColorsToJson(const CandidateSkinCatalog::ToolbarColors &colors)
+{
+    nlohmann::json json = nlohmann::json::object();
+    if (!colors.background.empty())
+        json["background"] = colors.background;
+    if (!colors.border.empty())
+        json["border"] = colors.border;
+    if (!colors.handle.empty())
+        json["handle"] = colors.handle;
+    if (!colors.divider.empty())
+        json["divider"] = colors.divider;
+    if (!colors.icon.empty())
+        json["icon"] = colors.icon;
+    if (!colors.hover.empty())
+        json["hover"] = colors.hover;
+    return json;
+}
+
+void ShowAboutSection()
+{
+    if (!g_webview)
+        return;
+    g_webview->ExecuteScript(LR"JS((() => {
+        const selectAbout = () => {
+            const item = document.querySelector('.sidebar .item[data-target="about-settings"]');
+            if (!item) return false;
+            if (!item.classList.contains('active')) item.click();
+            const section = document.getElementById('about-settings');
+            if (!item.classList.contains('active') || !section || getComputedStyle(section).display === 'none')
+                return false;
+            item.scrollIntoView({ block: 'nearest' });
+            return true;
+        };
+        if (selectAbout()) return;
+        const retry = setInterval(() => {
+            if (selectAbout()) clearInterval(retry);
+        }, 50);
+        setTimeout(() => clearInterval(retry), 10000);
+    })())JS",
+                             nullptr);
+}
+
+void ApplyWindowActivationAppearance()
+{
+    if (!g_webview)
+        return;
+
+    // Keep this effect in the native host so it follows the real top-level
+    // activation state rather than DOM focus. Only title-bar foreground
+    // elements are muted; the page and title-bar backgrounds remain intact.
+    const wchar_t *script = g_window_active ? LR"JS((() => {
+            document.getElementById('metasequoia-window-inactive-overlay')?.remove();
+            const id = 'metasequoia-window-activation-style';
+            if (!document.getElementById(id)) {
+                const style = document.createElement('style');
+                style.id = id;
+                style.textContent = `
+                    .titlebar-left, .window-button {
+                        transition: opacity 140ms ease-out;
+                    }
+                    html.metasequoia-window-inactive .titlebar-left,
+                    html.metasequoia-window-inactive .window-button {
+                        opacity: 0.52 !important;
+                    }
+                    html.metasequoia-window-inactive .window-button:hover,
+                    html.metasequoia-window-inactive .window-button.host-hover {
+                        opacity: 1 !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            document.documentElement.classList.remove('metasequoia-window-inactive');
+        })())JS"
+                                            : LR"JS((() => {
+            document.getElementById('metasequoia-window-inactive-overlay')?.remove();
+            const id = 'metasequoia-window-activation-style';
+            if (!document.getElementById(id)) {
+                const style = document.createElement('style');
+                style.id = id;
+                style.textContent = `
+                    .titlebar-left, .window-button {
+                        transition: opacity 140ms ease-out;
+                    }
+                    html.metasequoia-window-inactive .titlebar-left,
+                    html.metasequoia-window-inactive .window-button {
+                        opacity: 0.52 !important;
+                    }
+                    html.metasequoia-window-inactive .window-button:hover,
+                    html.metasequoia-window-inactive .window-button.host-hover {
+                        opacity: 1 !important;
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            document.documentElement.classList.add('metasequoia-window-inactive');
+        })())JS";
+    g_webview->ExecuteScript(script, nullptr);
+}
+
+void ApplySettingsChromeTheme(HWND hwnd = nullptr)
+{
+    const HWND target = hwnd ? hwnd : g_settings_hwnd;
+    const bool light = g_settings_light;
+    if (target)
+    {
+        BOOL dark = light ? FALSE : TRUE;
+        DwmSetWindowAttribute(target, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    }
+    if (g_controller2)
+    {
+        COREWEBVIEW2_COLOR background =
+            light ? COREWEBVIEW2_COLOR{255, 243, 243, 243} : COREWEBVIEW2_COLOR{255, 32, 32, 32};
+        g_controller2->put_DefaultBackgroundColor(background);
+    }
+}
+
+void ResetTitlebarHoverAfterVisibilityChange()
+{
+    if (!g_webview)
+        return;
+
+    g_webview->ExecuteScript(LR"JS((() => {
+        const root = document.documentElement;
+        const suppressClass = 'metasequoia-suppress-titlebar-tooltip';
+        const styleId = 'metasequoia-titlebar-tooltip-reset-style';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = `
+                html.${suppressClass} .window-button[data-tooltip]::after,
+                html.${suppressClass} .window-button[data-tooltip]:hover::after {
+                    opacity: 0 !important;
+                    transform: translateX(-50%) !important;
+                    transition-delay: 0s !important;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        root.classList.add(suppressClass);
+        document.querySelector('.window-controls')
+            ?.classList.add('window-controls-click-reset');
+        document.querySelectorAll('.window-button').forEach((button) => {
+            button.classList.remove('host-hover', 'host-active');
+            if (button instanceof HTMLElement) button.blur();
+        });
+
+        const previousRelease = window.__metasequoiaReleaseTooltipReset;
+        if (typeof previousRelease === 'function') {
+            window.removeEventListener('pointermove', previousRelease, true);
+            window.removeEventListener('pointerdown', previousRelease, true);
+        }
+        const release = () => {
+            root.classList.remove(suppressClass);
+            window.removeEventListener('pointermove', release, true);
+            window.removeEventListener('pointerdown', release, true);
+            delete window.__metasequoiaReleaseTooltipReset;
+        };
+        window.__metasequoiaReleaseTooltipReset = release;
+        window.addEventListener('pointermove', release, {capture: true, once: true});
+        window.addEventListener('pointerdown', release, {capture: true, once: true});
+    })())JS",
+                             nullptr);
+}
+
+static nlohmann::json CustomHelpcodeSchemasJson()
+{
+    nlohmann::json schemas = nlohmann::json::array();
+    for (const auto &schema : GetCustomHelpcodeSchemas())
+        schemas.push_back({{"id", schema.schema}, {"name", schema.name}, {"name_en", schema.name_en}});
+    return schemas;
+}
+
+static nlohmann::json CustomShuangpinSchemasJson()
+{
+    nlohmann::json schemas = nlohmann::json::array();
+    for (const auto &schema : GetCustomShuangpinSchemas())
+    {
+        schemas.push_back(
+            {{"id", schema.schema}, {"name", schema.name}, {"name_en", schema.name_en}, {"error", schema.error}});
+    }
+    return schemas;
+}
+
+std::wstring BuildConfigMessage(bool refresh_skin_catalog)
+{
+
+    const VoiceInputConfig &voice = GetConfiguredVoiceInput();
+    const AiAssistantConfig &ai = GetConfiguredAiAssistant();
+    const auto translation_sync = TranslationSync::Status(CommonUtils::get_ime_data_path() + "\\ai-translations.db");
+    const TencentTmtConfig &tencent_tmt = GetConfiguredTencentTmt();
+    const CustomTranslationConfig &custom_translation = GetConfiguredCustomTranslation();
+    const NiuTransConfig &niutrans = GetConfiguredNiuTrans();
+    const NetworkProxyConfig network_proxy = GetConfiguredNetworkProxy();
+    const FrequencyAdjustmentConfig &frequency = GetConfiguredFrequencyAdjustment();
+    const FloatingToolbarItemsConfig &toolbar = GetConfiguredFloatingToolbarItems();
+    const std::filesystem::path skins_root = std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"skins";
+    if (refresh_skin_catalog)
+    {
+        g_candidate_skin_catalog = CandidateSkinCatalog::Scan(skins_root);
+        ++g_candidate_skin_catalog_revision;
+    }
+    const std::string skin_layout = GetConfiguredCandidateWindowLayout();
+    const std::string skin_theme = ResolveConfiguredTheme(GetConfiguredThemeCand());
+    nlohmann::json external_skins = nlohmann::json::array();
+    if (g_candidate_skin_catalog)
+    {
+        for (const auto &skin : g_candidate_skin_catalog->packages)
+        {
+            external_skins.push_back(
+                {{"id", skin.id},
+                 {"name", skin.name},
+                 {"version", skin.version},
+                 {"author", skin.author},
+                 {"description", skin.description},
+                 {"base", skin.base},
+                 {"layouts", skin.layouts},
+                 {"themes", skin.themes},
+                 {"minWidthDip", skin.minWidthDip},
+                 {"decorationTopDip", skin.decorationTopDip},
+                 {"decorationWidthDip", skin.decorationWidthDip},
+                 {"decorationImage", skin.decorationImage},
+                 {"decorationAlign", skin.decorationAlign},
+                 {"cornerRadiusDip", skin.cornerRadiusDip ? nlohmann::json(*skin.cornerRadiusDip) : nlohmann::json()},
+                 {"borderWidthDip", skin.borderWidthDip ? nlohmann::json(*skin.borderWidthDip) : nlohmann::json()},
+                 {"itemCornerRadiusDip",
+                  skin.itemCornerRadiusDip ? nlohmann::json(*skin.itemCornerRadiusDip) : nlohmann::json()},
+                 {"shadow", skin.shadow},
+                 {"fontFamily", skin.fontFamily},
+                 {"backgroundImage", skin.backgroundImage},
+                 {"backgroundFit", skin.backgroundFit},
+                 {"backgroundOpacity", skin.backgroundOpacity},
+                 {"candidate",
+                  {{"dark", CandidateColorsToJson(skin.dark)}, {"light", CandidateColorsToJson(skin.light)}}},
+                 {"toolbar",
+                  {{"dark", ToolbarColorsToJson(skin.toolbarDark)}, {"light", ToolbarColorsToJson(skin.toolbarLight)}}},
+                 {"toolbarCornerRadiusDip",
+                  skin.toolbarCornerRadiusDip ? nlohmann::json(*skin.toolbarCornerRadiusDip) : nlohmann::json()},
+                 // 已按 base 的默认皮肤清单解析好，页面预览直接用。
+                 {"pageArrows", CandidateSkinCatalog::ResolvePageArrows(skins_root, skin.id, &skin)},
+                 {"compatible", CandidateSkinCatalog::Supports(skin, skin_layout, skin_theme)}});
+        }
+    }
+    // 内置皮肤的翻页箭头开关每次都现读 skins/default，用户改完清单刷新设置页即可在预览里看到。
+    nlohmann::json builtin_page_arrows = nlohmann::json::object();
+    for (const auto &id : CandidateSkinCatalog::BuiltInIds())
+        builtin_page_arrows[id] = CandidateSkinCatalog::ResolvePageArrows(skins_root, id, nullptr);
+    nlohmann::json skin_issues = nlohmann::json::array();
+    if (g_candidate_skin_catalog)
+    {
+        for (const auto &issue : g_candidate_skin_catalog->issues)
+            skin_issues.push_back({{"folder", issue.folder}, {"reason", issue.reason}});
+    }
+    nlohmann::json polish_presets = nlohmann::json::array();
+    for (const auto &preset : VoiceInput::BuiltinPolishPromptPresets())
+    {
+        polish_presets.push_back({{"id", std::string(preset.id)},
+                                  {"name", std::string(preset.name)},
+                                  {"prompt", std::string(preset.prompt)}});
+    }
+    // 规则位取不门控视图：总开关关闭时复选框仍要展示用户已存的勾选；
+    // 总开关本身单独下发。
+    const metasequoia::FuzzyPinyinOptions fuzzy_rules = GetConfiguredFuzzyPinyinRuleStates();
+    nlohmann::json payload = {
+        {"type", "configSnapshot"},
+        {"data",
+         {{"input",
+           {{"mode", GetConfiguredInputMode()},
+            {"schema", GetConfiguredInputSchemeName()},
+            {"japanese_schema", GetConfiguredJapaneseSchema()},
+            {"character_set", GetConfiguredCharacterSet()},
+            {"default_ime_mode", GetConfiguredDefaultImeMode()},
+            {"ime_mode_scope", GetConfiguredImeModeScope()},
+            {"shuangpin_schema", GetConfiguredShuangpinSchema()},
+            {"wubi_schema", GetConfiguredWubiSchema()},
+            {"wubi_mixed_pinyin", GetConfiguredWubiMixedPinyin()},
+            {"escape_keeps_selected_word", GetConfiguredEscapeKeepsSelectedWord()},
+            {"enter_learns_english_word", GetConfiguredEnterLearnsEnglishWord()},
+            {"wubi_z_mode", GetConfiguredWubiZMode()},
+            {"word_to_character", GetConfiguredWordToCharacterEnabled()},
+            {"word_to_character_keys", GetConfiguredWordToCharacterKeys()},
+            {"smart_punctuation", GetConfiguredSmartPunctuationEnabled()},
+            {"smart_punctuation_space_convert", GetConfiguredSmartPunctuationSpaceConvertEnabled()},
+            {"smart_punctuation_direct_digit", GetConfiguredSmartPunctuationDirectDigitEnabled()},
+            {"smart_punctuation_direct_letter", GetConfiguredSmartPunctuationDirectLetterEnabled()},
+            {"smart_punctuation_repeat_to_chinese", GetConfiguredSmartPunctuationRepeatToChineseEnabled()},
+            {"paired_punctuation", GetConfiguredPairedPunctuationEnabled()},
+            {"punctuation_lock", GetConfiguredPunctuationLock()},
+            {"fuzzy_pinyin", GetConfiguredFuzzyPinyinEnabled()},
+            {"fuzzy_z_zh", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::Z_ZH)},
+            {"fuzzy_c_ch", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::C_CH)},
+            {"fuzzy_s_sh", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::S_SH)},
+            {"fuzzy_n_l", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::N_L)},
+            {"fuzzy_f_h", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::F_H)},
+            {"fuzzy_r_l", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::R_L)},
+            {"fuzzy_an_ang", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::AN_ANG)},
+            {"fuzzy_en_eng", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::EN_ENG)},
+            {"fuzzy_in_ing", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::IN_ING)},
+            {"fuzzy_ian_iang", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::IAN_IANG)},
+            {"fuzzy_uan_uang", fuzzy_rules.enabled(metasequoia::FuzzyPinyinRule::UAN_UANG)}}},
+          {"general",
+           {{"diagnostic_log", GetConfiguredDiagnosticLogEnabled()},
+            {"candidate_window_diagnostic_log", GetConfiguredDiagnosticLogEnabled()},
+            {"tsf_diagnostic_log", GetConfiguredTsfDiagnosticLogEnabled()},
+            {"floating_toolbar", GetConfiguredFloatingToolbarEnabled()},
+            {"caret_state_indicator", GetConfiguredCaretStateIndicatorEnabled()},
+            {"caret_state_indicator_on_focus", GetConfiguredCaretStateIndicatorOnFocus()},
+            {"caret_state_indicator_position", GetConfiguredCaretStateIndicatorPosition()},
+            {"floating_toolbar_fullwidth", toolbar.fullwidth},
+            {"floating_toolbar_punctuation", toolbar.punctuation},
+            {"floating_toolbar_character_set", toolbar.character_set},
+            {"floating_toolbar_emoji", toolbar.emoji},
+            {"floating_toolbar_screen_keyboard", toolbar.screen_keyboard},
+            {"floating_toolbar_settings", toolbar.settings},
+            {"floating_toolbar_scale", GetConfiguredFloatingToolbarScale()},
+            {"floating_toolbar_font_size", GetConfiguredFloatingToolbarFontSize()},
+            {"floating_toolbar_auto_hide", GetConfiguredFloatingToolbarAutoHide()},
+            {"floating_toolbar_auto_hide_delay", GetConfiguredFloatingToolbarAutoHideDelay()},
+            {"cn_en_mixed_input", GetConfiguredEnglishCandidatesEnabled()},
+            {"candidate_translations", GetConfiguredCandidateTranslationsEnabled()},
+            {"cn_en_mixed_input_min_chars", GetConfiguredEnglishMixedInputMinChars()},
+            {"emoji_mixed_input", GetConfiguredEmojiMixedInputEnabled()},
+            {"kaomoji_mixed_input", GetConfiguredKaomojiMixedInputEnabled()},
+            {"cloud_candidates", GetConfiguredCloudCandidatesEnabled()},
+            {"paging_minus_equal", GetConfiguredPagingMinusEqualEnabled()},
+            {"paging_comma_period", GetConfiguredPagingCommaPeriodEnabled()},
+            {"paging_brackets", GetConfiguredPagingBracketsEnabled()},
+            {"paging_tab", GetConfiguredPagingTabEnabled()},
+            {"paging_page_up_down", GetConfiguredPagingPageUpDownEnabled()},
+            {"paging_mouse_wheel", GetConfiguredPagingMouseWheelEnabled()},
+            {"candidate_arrow_navigation", GetConfiguredCandidateArrowNavigationEnabled()}}},
+          {"association",
+           {{"sentence_wordlattice", GetConfiguredAssocSentenceWordLattice()},
+            {"sentence_google", GetConfiguredAssocSentenceGoogle()},
+            {"sentence_neural_desktop", GetConfiguredAssocSentenceNeuralDesktop()},
+            {"sentence_neural_keyboard", GetConfiguredAssocSentenceNeuralKeyboard()},
+            {"sentence_show_next_on_duplicate", GetConfiguredAssocSentenceShowNextOnDuplicate()},
+            {"sentence_source_badge", GetConfiguredAssocSentenceSourceBadge()},
+            {"sentence_collocation_enabled", GetConfiguredAssocSentenceCollocationEnabled()},
+            {"sentence_collocation_model_status", [] {
+                 nlohmann::json statuses = nlohmann::json::object();
+                 for (const auto &[model_id, status] : collocation::GetModelStatuses())
+                     statuses[model_id] = nlohmann::json{{"state", status.state}, {"progress", status.progress},
+                                                         {"error", status.error}};
+                 return statuses;
+             }()},
+            {"sentence_collocation_model", GetConfiguredAssocSentenceCollocationModel()},
+            {"sentence_collocation_catalog", [] {
+                 // 页面不自持目录副本：id 与下载 URL 留在 Server 侧，只下发展示字段。
+                 nlohmann::json catalog = nlohmann::json::array();
+                 for (const auto &entry : collocation::Catalog())
+                 {
+                     catalog.push_back(nlohmann::json{{"id", entry.id},
+                                                      {"displayName", entry.display_name},
+                                                      {"sizeHint", entry.size_hint},
+                                                      {"license", entry.license},
+                                                      {"url", collocation::SourceUrl(entry)}});
+                 }
+                 return catalog;
+             }()}}},
+          {"keybindings",
+           {{"switch_language_shift", GetConfiguredSwitchLanguageShiftEnabled()},
+            {"switch_language_ctrl", GetConfiguredSwitchLanguageCtrlEnabled()},
+            {"switch_language_ctrl_alt_space", GetConfiguredSwitchLanguageCtrlAltSpaceEnabled()},
+            {"toggle_character_set_ctrl_shift_f", GetConfiguredCharacterSetShortcutEnabled()}}},
+          {"frequency_adjustment",
+           {{"mode", frequency.mode},
+            {"trigger_count", frequency.trigger_count},
+            {"linear_step", frequency.linear_step}}},
+          {"utility",
+           {{"unicode_mode", GetConfiguredUnicodeModeEnabled()},
+            {"quick_phrase", GetConfiguredQuickPhraseEnabled()},
+            {"quick_phrase_candidates", GetConfiguredQuickPhraseCandidatesEnabled()},
+            {"quick_phrase_frequency", GetConfiguredQuickPhraseFrequencyEnabled()},
+            {"mixed_candidates", GetConfiguredMixedCandidatesEnabled()},
+            {"date_time_candidates", GetConfiguredDateTimeCandidatesEnabled()},
+            {"date_time_menu", GetConfiguredDateTimeMenuEnabled()},
+            {"date_time_mode", GetConfiguredDateTimeModeEnabled()},
+            {"emoji_mode", GetConfiguredEmojiModeEnabled()},
+            {"kaomoji_mode", GetConfiguredKaomojiModeEnabled()},
+            {"jianpin_mode", GetConfiguredJianpinModeEnabled()},
+            {"y_mode", GetConfiguredYModeEnabled()},
+            {"r_mode", GetConfiguredRModeEnabled()},
+            {"clipboard_history", GetConfiguredClipboardHistoryEnabled()}}},
+          {"appearance",
+           {{"ui_backend", GetConfiguredUiBackend()},
+            {"settings_window_linger", GetConfiguredSettingsWindowLinger()},
+            {"candidate_window_layout", GetConfiguredCandidateWindowLayout()},
+            {"candidate_window_follow_cursor", GetConfiguredCandidateWindowFollowCursor()},
+            {"candidate_skin", GetConfiguredCandidateSkin()},
+            {"candidate_window_preedit_style", GetConfiguredCandidateWindowPreeditStyle()},
+            {"candidate_window_preedit_shuangpin_quanpin", GetConfiguredCandidateWindowPreeditShuangpinQuanpin()},
+            {"candidate_fixed_badge", GetConfiguredCandidateFixedBadge()},
+            {"candidate_fixed_badge_style", GetConfiguredCandidateFixedBadgeStyle()},
+            {"tsf_preedit_style", GetConfiguredTsfPreeditStyle()},
+            {"tsf_preedit_shuangpin_quanpin", GetConfiguredTsfPreeditShuangpinQuanpin()},
+            {"theme_mode", GetConfiguredThemeMode()},
+            {"theme_settings", GetConfiguredThemeSettings()},
+            {"theme_cand", GetConfiguredThemeCand()},
+            {"theme_ftb", GetConfiguredThemeFtb()},
+            {"theme_menu", GetConfiguredThemeMenu()},
+            {"theme_emoji", GetConfiguredThemeEmoji()},
+            {"theme_screen_keyboard", GetConfiguredThemeScreenKeyboard()},
+            {"theme_handwriting", GetConfiguredThemeHandwriting()},
+            {"theme_voice", GetConfiguredThemeVoice()},
+            {"page_size", GetConfiguredCandidatePageSize()},
+            {"font", GetConfiguredCandidateFont()},
+            {"font_css_family", ResolveSystemFontFamilyForCss(GetConfiguredCandidateFont())},
+            {"fallback_fonts", GetConfiguredCandidateFallbackFonts()},
+            {"fallback_font_css_families", GetConfiguredCandidateFallbackFontFamilies()},
+            {"english_font", GetConfiguredCandidateEnglishFont()},
+            {"english_font_css_family", ResolveSystemFontFamilyForCss(GetConfiguredCandidateEnglishFont())},
+            {"default_font", GetConfiguredCandidateDefaultFont()},
+            {"default_font_css_family", ResolveSystemFontFamilyForCss(GetConfiguredCandidateDefaultFont())},
+            {"font_size", GetConfiguredCandidateFontSize()},
+            {"candidate_window_preedit_font_size", GetConfiguredCandidateWindowPreeditFontSize()},
+            {"cand_text_color", GetConfiguredCandidateTextColor()},
+            {"system_fonts", GetSystemFontFamilies()},
+            {"builtin_skin_page_arrows", std::move(builtin_page_arrows)},
+            {"external_candidate_skins", std::move(external_skins)},
+            {"candidate_skin_scan_issues", std::move(skin_issues)},
+            {"candidate_skin_catalog_scanned", g_candidate_skin_catalog.has_value()},
+            {"candidate_skin_catalog_revision", g_candidate_skin_catalog_revision},
+            {"candidate_skin_directory", skins_root.u8string()}}},
+          {"voice_input",
+           {{"enabled", voice.enabled},
+            {"hotkey_ralt", voice.hotkey_ralt},
+            {"hotkey_ctrl_f9", voice.hotkey_ctrl_f9},
+            {"hotkey_ctrl_win", voice.hotkey_ctrl_win},
+            {"hotkey_rctrl_ralt", voice.hotkey_rctrl_ralt},
+            {"hotkey_hold_space_lock", voice.hotkey_hold_space_lock},
+            {"asr_provider", voice.asr_provider},
+            {"doubao_auth_mode", voice.doubao_auth_mode},
+            {"asr_app_key", voice.asr_app_key},
+            {"asr_token", voice.asr_token},
+            {"asr_tokens", voice.asr_tokens},
+            {"asr_endpoint", voice.asr_endpoint},
+            {"asr_resource_id", voice.asr_resource_id},
+            {"doubao_enable_itn", voice.doubao_enable_itn},
+            {"doubao_enable_punc", voice.doubao_enable_punc},
+            {"doubao_enable_ddc", voice.doubao_enable_ddc},
+            {"doubao_boosting_table_id", voice.doubao_boosting_table_id},
+            {"asr_model", voice.asr_model},
+            {"polish_provider", voice.polish_provider},
+            {"polish_token", voice.polish_token},
+            {"polish_tokens", voice.polish_tokens},
+            {"polish_endpoint", voice.polish_endpoint},
+            {"polish_model", voice.polish_model},
+            {"polish_prompt_id", voice.polish_prompt_id},
+            {"polish_prompt", voice.polish_prompt},
+            {"polish_prompt_custom_1", voice.polish_prompt_custom_1},
+            {"polish_prompt_custom_2", voice.polish_prompt_custom_2},
+            {"polish_prompt_custom_3", voice.polish_prompt_custom_3},
+            {"language", voice.language},
+            {"start_sound", voice.start_sound},
+            {"end_sound", voice.end_sound},
+            {"mute_system_audio", voice.mute_system_audio},
+            {"notification_sound", voice.start_sound && voice.end_sound},
+            {"polish_text", voice.polish_text},
+            {"stream_inline_preedit", voice.stream_inline_preedit},
+            {"commit_mode", voice.commit_mode}}},
+          {"ai_assistant",
+           {{"enabled", ai.enabled},
+            {"translation_enabled", ai.translation_enabled},
+            {"translation_sync_enabled", ai.translation_sync_enabled},
+            {"translation_sync_last_time", translation_sync["translation_sync_last_time"]},
+            {"translation_sync_status", translation_sync["translation_sync_status"]},
+            {"translation_sync_client", translation_sync["translation_sync_client"]},
+            {"translation_sync_authorized", translation_sync["translation_sync_authorized"]},
+            {"translation_target_language", ai.translation_target_language},
+            {"reading_target_language", ai.reading_target_language},
+            {"translation_hotkey", ai.translation_hotkey},
+            {"provider", ai.provider},
+            {"token", ai.token},
+            {"tokens", ai.tokens},
+            {"endpoint", ai.endpoint},
+            {"model", ai.model},
+            {"endpoints", ai.endpoints},
+            {"models", ai.models},
+            {"candidate_limit", ai.candidate_limit},
+            {"prompt", ai.prompt},
+            {"prompt_id", ai.prompt_id},
+            {"prompt_custom_1", ai.prompt_custom_1},
+            {"prompt_custom_2", ai.prompt_custom_2},
+            {"prompt_custom_3", ai.prompt_custom_3}}},
+          {"tencent_tmt",
+           {{"secret_id", tencent_tmt.secret_id},
+            {"secret_key", tencent_tmt.secret_key},
+            {"region", tencent_tmt.region},
+            {"target_language", tencent_tmt.target_language}}},
+          {"custom_translation",
+           {{"enabled", custom_translation.enabled},
+            {"endpoint", custom_translation.endpoint},
+            {"api_key", custom_translation.api_key}}},
+          {"niutrans", {{"enabled", niutrans.enabled}, {"app_id", niutrans.app_id}, {"apikey", niutrans.apikey}}},
+          {"network", {{"proxy_mode", network_proxy.mode}, {"proxy_server", network_proxy.server}}},
+          {"helpcode",
+           {{"shuangpin_helpcode", GetConfiguredShuangpinHelpcodeEnabled()},
+            {"shuangpin_mid_sentence_helpcode", GetConfiguredShuangpinMidSentenceHelpcodeEnabled()},
+            {"shuangpin_mid_sentence_helpcode_backtick", GetConfiguredShuangpinMidSentenceHelpcodeBacktick()},
+            {"shuangpin_mid_sentence_helpcode_semicolon", GetConfiguredShuangpinMidSentenceHelpcodeSemicolon()},
+            {"shuangpin_helpcode_schema", GetConfiguredShuangpinHelpcodeSchema()},
+            {"quanpin_helpcode", GetConfiguredQuanpinHelpcodeEnabled()},
+            {"quanpin_helpcode_schema", GetConfiguredQuanpinHelpcodeSchema()},
+            {"show_sp_helpcode_in_candidate_window", GetConfiguredShowShuangpinHelpcodeInCandidateWindow()},
+            {"show_qp_helpcode_in_candidate_window", GetConfiguredShowQuanpinHelpcodeInCandidateWindow()}}},
+          {"quanpin",
+           {{"autocorrect_transposition", GetConfiguredQuanpinAutocorrectTransposition()},
+            {"autocorrect_neighbor", GetConfiguredQuanpinAutocorrectNeighbor()}}},
+          {"statistics",
+           {{"enabled", GetConfiguredStatisticsEnabled()}, {"retention", GetConfiguredStatisticsRetention()}}}}}};
+    payload["data"]["voice_input"]["polish_presets"] = std::move(polish_presets);
+    payload["data"]["helpcode"]["custom_schemas"] = CustomHelpcodeSchemasJson();
+    payload["data"]["helpcode"]["custom_directory"] = GetCustomHelpcodeDirectory();
+    payload["data"]["input"]["custom_shuangpin_schemas"] = CustomShuangpinSchemasJson();
+    payload["data"]["input"]["custom_shuangpin_directory"] = GetCustomShuangpinDirectory();
+    payload["protocolVersion"] = metasequoia::webview::Version;
+    const std::string serialized = payload.dump();
+    if (!metasequoia::webview::Validate(json::parse(serialized), "server"))
+        throw std::runtime_error("Invalid config snapshot");
+    return string_to_wstring(serialized);
+}
+
+SerialTaskQueue::Completion ConfigCompletion(bool refresh_skin_catalog = false)
+{
+    TraceStartup(refresh_skin_catalog ? "worker: BuildConfigMessage(skins) begin" : "worker: BuildConfigMessage begin");
+    auto message = BuildConfigMessage(refresh_skin_catalog);
+    TraceStartup("worker: BuildConfigMessage end");
+    const bool light = ResolveConfiguredTheme(GetConfiguredThemeSettings()) == "light";
+    return [message = std::move(message), light, linger = GetConfiguredSettingsWindowLinger()] {
+        g_settings_light = light;
+        g_settings_window_linger = linger;
+        ApplySettingsChromeTheme();
+        SettingsSplash::SetTheme(light);
+        if (g_webview && message != g_last_config_message)
+        {
+            if (SUCCEEDED(g_webview->PostWebMessageAsJson(message.c_str())))
+            {
+                g_last_config_message = message;
+                TraceStartup("ui: config posted to page");
+            }
+        }
+        else if (!g_webview)
+        {
+            TraceStartup("ui: config dropped (webview not ready)");
+        }
+    };
+}
+
+void PostConfig(bool refresh_skin_catalog = false)
+{
+    if (!g_worker || g_closing)
+        return;
+    g_worker->Submit([refresh_skin_catalog] { return ConfigCompletion(refresh_skin_catalog); });
+}
+
+void PostValidatedServerMessage(json::object payload)
+{
+    if (!g_webview)
+        return;
+    payload["protocolVersion"] = metasequoia::webview::Version;
+    if (!metasequoia::webview::Validate(payload, "server"))
+        return;
+    const std::wstring message = string_to_wstring(json::serialize(payload));
+    g_webview->PostWebMessageAsJson(message.c_str());
+}
+
+void PostWindowState(HWND hwnd)
+{
+    PostValidatedServerMessage({
+        {"type", "windowState"},
+        {"data", {{"isMaximized", IsZoomed(hwnd) != FALSE}}},
+    });
+}
+
+void PostMaximizeButtonEvent(const char *event_name)
+{
+    PostValidatedServerMessage({
+        {"type", "maxButtonEvent"},
+        {"data", {{"event", event_name}}},
+    });
+}
+
+bool ApplyConfigUpdate(const json::object &data)
+{
+    const std::string path = json::value_to<std::string>(data.at("path"));
+    if (path == "input.mode")
+        return SetConfiguredInputMode(json::value_to<std::string>(data.at("value")));
+    if (path == "input.schema")
+        return SetConfiguredInputScheme(json::value_to<std::string>(data.at("value")));
+    if (path == "input.japanese_schema")
+        return SetConfiguredJapaneseSchema(json::value_to<std::string>(data.at("value")));
+    if (path == "input.character_set")
+        return SetConfiguredCharacterSet(json::value_to<std::string>(data.at("value")));
+    if (path == "input.default_ime_mode")
+        return SetConfiguredDefaultImeMode(json::value_to<std::string>(data.at("value")));
+    if (path == "input.ime_mode_scope")
+        return SetConfiguredImeModeScope(json::value_to<std::string>(data.at("value")));
+    if (path == "input.shuangpin_schema")
+        return SetConfiguredShuangpinSchema(json::value_to<std::string>(data.at("value")));
+    if (path == "input.wubi_schema")
+        return SetConfiguredWubiSchema(json::value_to<std::string>(data.at("value")));
+    if (path == "input.wubi_mixed_pinyin")
+        return SetConfiguredWubiMixedPinyin(json::value_to<bool>(data.at("value")));
+    if (path == "input.escape_keeps_selected_word")
+        return SetConfiguredEscapeKeepsSelectedWord(json::value_to<bool>(data.at("value")));
+    if (path == "input.enter_learns_english_word")
+        return SetConfiguredEnterLearnsEnglishWord(json::value_to<bool>(data.at("value")));
+    if (path == "input.wubi_z_mode")
+        return SetConfiguredWubiZMode(json::value_to<std::string>(data.at("value")));
+    if (path == "input.word_to_character")
+        return SetConfiguredWordToCharacterEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.word_to_character_keys")
+        return SetConfiguredWordToCharacterKeys(json::value_to<std::string>(data.at("value")));
+    if (path == "input.smart_punctuation")
+        return SetConfiguredSmartPunctuationEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.smart_punctuation_space_convert")
+        return SetConfiguredSmartPunctuationSpaceConvertEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.smart_punctuation_direct_digit")
+        return SetConfiguredSmartPunctuationDirectDigitEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.smart_punctuation_direct_letter")
+        return SetConfiguredSmartPunctuationDirectLetterEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.smart_punctuation_repeat_to_chinese")
+        return SetConfiguredSmartPunctuationRepeatToChineseEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.paired_punctuation")
+        return SetConfiguredPairedPunctuationEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "input.punctuation_lock")
+        return SetConfiguredPunctuationLock(json::value_to<std::string>(data.at("value")));
+    constexpr std::string_view input_section_prefix = "input.";
+    constexpr std::string_view fuzzy_prefix = "input.fuzzy_";
+    // 精确分支必须在前：总开关键同样命中 fuzzy_ 前缀，不能靠 prefix setter 拒绝它。
+    if (path == "input.fuzzy_pinyin")
+        return SetConfiguredFuzzyPinyinEnabled(json::value_to<bool>(data.at("value")));
+    if (path.rfind(fuzzy_prefix, 0) == 0)
+        return SetConfiguredFuzzyPinyinRule(path.substr(input_section_prefix.size()),
+                                            json::value_to<bool>(data.at("value")));
+    if (path == "appearance.tsf_preedit_style")
+        return SetConfiguredTsfPreeditStyle(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.tsf_preedit_shuangpin_quanpin")
+        return SetConfiguredTsfPreeditShuangpinQuanpin(json::value_to<bool>(data.at("value")));
+    if (path == "appearance.ui_backend")
+        return SetConfiguredUiBackend(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.settings_window_linger")
+        return SetConfiguredSettingsWindowLinger(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.candidate_window_layout")
+        return SetConfiguredCandidateWindowLayout(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.candidate_window_follow_cursor")
+        return SetConfiguredCandidateWindowFollowCursor(json::value_to<bool>(data.at("value")));
+    if (path == "appearance.candidate_skin")
+        return SetConfiguredCandidateSkin(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.candidate_window_preedit_style")
+        return SetConfiguredCandidateWindowPreeditStyle(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.candidate_window_preedit_shuangpin_quanpin")
+        return SetConfiguredCandidateWindowPreeditShuangpinQuanpin(json::value_to<bool>(data.at("value")));
+    if (path == "appearance.candidate_fixed_badge")
+        return SetConfiguredCandidateFixedBadge(json::value_to<bool>(data.at("value")));
+    if (path == "appearance.candidate_fixed_badge_style")
+        return SetConfiguredCandidateFixedBadgeStyle(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.page_size")
+        return SetConfiguredCandidatePageSize(static_cast<int>(data.at("value").as_int64()));
+    if (path == "appearance.font")
+        return SetConfiguredCandidateFont(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.fallback_fonts")
+        return SetConfiguredCandidateFallbackFonts(
+            json::value_to<std::vector<std::string>>(json::parse(json::value_to<std::string>(data.at("value")))));
+    if (path == "appearance.english_font")
+        return SetConfiguredCandidateEnglishFont(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.font_size")
+        return SetConfiguredCandidateFontSize(static_cast<int>(data.at("value").as_int64()));
+    if (path == "appearance.candidate_window_preedit_font_size")
+        return SetConfiguredCandidateWindowPreeditFontSize(static_cast<int>(data.at("value").as_int64()));
+    if (path == "appearance.cand_text_color")
+        return SetConfiguredCandidateTextColor(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_mode")
+        return SetConfiguredThemeMode(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_settings")
+        return SetConfiguredThemeSettings(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_cand")
+        return SetConfiguredThemeCand(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_ftb")
+        return SetConfiguredThemeFtb(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_menu")
+        return SetConfiguredThemeMenu(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_emoji")
+        return SetConfiguredThemeEmoji(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_screen_keyboard")
+        return SetConfiguredThemeScreenKeyboard(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_handwriting")
+        return SetConfiguredThemeHandwriting(json::value_to<std::string>(data.at("value")));
+    if (path == "appearance.theme_voice")
+        return SetConfiguredThemeVoice(json::value_to<std::string>(data.at("value")));
+    if (path == "general.floating_toolbar")
+        return SetConfiguredFloatingToolbarEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.caret_state_indicator")
+        return SetConfiguredCaretStateIndicatorEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.caret_state_indicator_on_focus")
+        return SetConfiguredCaretStateIndicatorOnFocus(json::value_to<bool>(data.at("value")));
+    if (path == "general.caret_state_indicator_position")
+        return SetConfiguredCaretStateIndicatorPosition(json::value_to<std::string>(data.at("value")));
+    if (path == "general.diagnostic_log" || path == "general.candidate_window_diagnostic_log")
+        return SetConfiguredDiagnosticLogEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.tsf_diagnostic_log")
+        return SetConfiguredTsfDiagnosticLogEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "statistics.enabled")
+        return SetConfiguredStatisticsEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "statistics.retention")
+        return SetConfiguredStatisticsRetention(json::value_to<std::string>(data.at("value")));
+    if (path == "general.floating_toolbar_scale")
+    {
+        const json::value &value = data.at("value");
+        const double scale = value.is_double() ? value.as_double() : static_cast<double>(value.as_int64());
+        return SetConfiguredFloatingToolbarScale(scale);
+    }
+    if (path == "general.floating_toolbar_font_size")
+        return SetConfiguredFloatingToolbarFontSize(static_cast<int>(data.at("value").as_int64()));
+    // Must precede the item prefix below, which would reject these as unknown items.
+    if (path == "general.floating_toolbar_auto_hide")
+        return SetConfiguredFloatingToolbarAutoHide(json::value_to<bool>(data.at("value")));
+    if (path == "general.floating_toolbar_auto_hide_delay")
+        return SetConfiguredFloatingToolbarAutoHideDelay(static_cast<int>(data.at("value").as_int64()));
+    constexpr std::string_view toolbar_prefix = "general.floating_toolbar_";
+    if (path.rfind(toolbar_prefix, 0) == 0)
+        return SetConfiguredFloatingToolbarItemEnabled(path.substr(toolbar_prefix.size()),
+                                                       json::value_to<bool>(data.at("value")));
+    if (path == "general.cn_en_mixed_input")
+        return SetConfiguredEnglishCandidatesEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.candidate_translations")
+        return SetConfiguredCandidateTranslationsEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.cn_en_mixed_input_min_chars")
+        return SetConfiguredEnglishMixedInputMinChars(static_cast<int>(data.at("value").as_int64()));
+    if (path == "general.emoji_mixed_input")
+        return SetConfiguredEmojiMixedInputEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.kaomoji_mixed_input")
+        return SetConfiguredKaomojiMixedInputEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.cloud_candidates")
+        return SetConfiguredCloudCandidatesEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_wordlattice")
+        return SetConfiguredAssocSentenceWordLattice(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_google")
+        return SetConfiguredAssocSentenceGoogle(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_neural_desktop")
+        return SetConfiguredAssocSentenceNeuralDesktop(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_neural_keyboard")
+        return SetConfiguredAssocSentenceNeuralKeyboard(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_show_next_on_duplicate")
+        return SetConfiguredAssocSentenceShowNextOnDuplicate(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_source_badge")
+        return SetConfiguredAssocSentenceSourceBadge(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_collocation_enabled")
+        return SetConfiguredAssocSentenceCollocationEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "association.sentence_collocation_model")
+        return SetConfiguredAssocSentenceCollocationModel(json::value_to<std::string>(data.at("value")));
+    if (path == "utility.unicode_mode")
+        return SetConfiguredUnicodeModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.quick_phrase")
+        return SetConfiguredQuickPhraseEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.quick_phrase_candidates")
+        return SetConfiguredQuickPhraseCandidatesEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.quick_phrase_frequency")
+        return SetConfiguredQuickPhraseFrequencyEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.mixed_candidates")
+        return SetConfiguredMixedCandidatesEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.date_time_candidates")
+        return SetConfiguredDateTimeCandidatesEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.date_time_menu")
+        return SetConfiguredDateTimeMenuEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.date_time_mode")
+        return SetConfiguredDateTimeModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.emoji_mode")
+        return SetConfiguredEmojiModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.kaomoji_mode")
+        return SetConfiguredKaomojiModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.jianpin_mode")
+        return SetConfiguredJianpinModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.y_mode")
+        return SetConfiguredYModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.r_mode")
+        return SetConfiguredRModeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "utility.clipboard_history")
+        return SetConfiguredClipboardHistoryEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_minus_equal")
+        return SetConfiguredPagingMinusEqualEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_tab")
+        return SetConfiguredPagingTabEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_comma_period")
+        return SetConfiguredPagingCommaPeriodEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_brackets")
+        return SetConfiguredPagingBracketsEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_page_up_down")
+        return SetConfiguredPagingPageUpDownEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.paging_mouse_wheel")
+        return SetConfiguredPagingMouseWheelEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "general.candidate_arrow_navigation")
+        return SetConfiguredCandidateArrowNavigationEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "keybindings.switch_language_shift")
+        return SetConfiguredSwitchLanguageShiftEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "keybindings.switch_language_ctrl")
+        return SetConfiguredSwitchLanguageCtrlEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "keybindings.switch_language_ctrl_alt_space")
+        return SetConfiguredSwitchLanguageCtrlAltSpaceEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "keybindings.toggle_character_set_ctrl_shift_f")
+        return SetConfiguredCharacterSetShortcutEnabled(json::value_to<bool>(data.at("value")));
+    if (path.rfind("frequency_adjustment.", 0) == 0)
+    {
+        const std::string key = path.substr(21);
+        const json::value &value = data.at("value");
+        if (value.is_string())
+            return SetConfiguredFrequencyAdjustmentString(key, json::value_to<std::string>(value));
+        if (value.is_int64())
+            return SetConfiguredFrequencyAdjustmentInt(key, static_cast<int>(value.as_int64()));
+        return false;
+    }
+    if (path.rfind("voice_input.", 0) == 0)
+    {
+        const std::string key = path.substr(12);
+        const json::value &value = data.at("value");
+        if (value.is_bool())
+        {
+            return SetConfiguredVoiceInputBool(key, json::value_to<bool>(value));
+        }
+        if (value.is_string())
+            return SetConfiguredVoiceInputString(key, json::value_to<std::string>(value));
+        return false;
+    }
+    if (path.rfind("ai_assistant.", 0) == 0)
+    {
+        const std::string key = path.substr(13);
+        const json::value &value = data.at("value");
+        if (value.is_bool())
+            return SetConfiguredAiAssistantBool(key, json::value_to<bool>(value));
+        if (value.is_string())
+            return SetConfiguredAiAssistantString(key, json::value_to<std::string>(value));
+        if (value.is_int64())
+            return SetConfiguredAiAssistantInt(key, static_cast<int>(value.as_int64()));
+        return false;
+    }
+    if (path.rfind("tencent_tmt.", 0) == 0)
+    {
+        const json::value &value = data.at("value");
+        return value.is_string() && SetConfiguredTencentTmtString(path.substr(std::string("tencent_tmt.").size()),
+                                                                  json::value_to<std::string>(value));
+    }
+    if (path == "custom_translation.enabled")
+        return SetConfiguredCustomTranslationBool("enabled", json::value_to<bool>(data.at("value")));
+    if (path.rfind("custom_translation.", 0) == 0)
+    {
+        const json::value &value = data.at("value");
+        return value.is_string() &&
+               SetConfiguredCustomTranslationString(path.substr(std::string("custom_translation.").size()),
+                                                    json::value_to<std::string>(value));
+    }
+    if (path == "niutrans.enabled")
+        return SetConfiguredNiuTransBool("enabled", json::value_to<bool>(data.at("value")));
+    if (path.rfind("niutrans.", 0) == 0)
+    {
+        const json::value &value = data.at("value");
+        return value.is_string() && SetConfiguredNiuTransString(path.substr(std::string("niutrans.").size()),
+                                                                json::value_to<std::string>(value));
+    }
+    if (path.rfind("network.", 0) == 0)
+    {
+        const json::value &value = data.at("value");
+        return value.is_string() && SetConfiguredNetworkString(path.substr(std::string("network.").size()),
+                                                               json::value_to<std::string>(value));
+    }
+    if (path == "helpcode.show_sp_helpcode_in_candidate_window")
+        return SetConfiguredShowShuangpinHelpcodeInCandidateWindow(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode")
+        return SetConfiguredShuangpinHelpcodeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_mid_sentence_helpcode")
+        return SetConfiguredShuangpinMidSentenceHelpcodeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_mid_sentence_helpcode_backtick")
+        return SetConfiguredShuangpinMidSentenceHelpcodeBacktick(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_mid_sentence_helpcode_semicolon")
+        return SetConfiguredShuangpinMidSentenceHelpcodeSemicolon(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.shuangpin_helpcode_schema")
+        return SetConfiguredShuangpinHelpcodeSchema(json::value_to<std::string>(data.at("value")));
+    if (path == "helpcode.quanpin_helpcode")
+        return SetConfiguredQuanpinHelpcodeEnabled(json::value_to<bool>(data.at("value")));
+    if (path == "helpcode.quanpin_helpcode_schema")
+        return SetConfiguredQuanpinHelpcodeSchema(json::value_to<std::string>(data.at("value")));
+    if (path == "helpcode.show_qp_helpcode_in_candidate_window")
+        return SetConfiguredShowQuanpinHelpcodeInCandidateWindow(json::value_to<bool>(data.at("value")));
+    if (path == "quanpin.autocorrect_transposition")
+        return SetConfiguredQuanpinAutocorrectTransposition(json::value_to<bool>(data.at("value")));
+    if (path == "quanpin.autocorrect_neighbor")
+        return SetConfiguredQuanpinAutocorrectNeighbor(json::value_to<bool>(data.at("value")));
+    return false;
+}
+
+int HitTestName(const std::string &name)
+{
+    if (name == "left")
+        return HTLEFT;
+    if (name == "right")
+        return HTRIGHT;
+    if (name == "top")
+        return HTTOP;
+    if (name == "bottom")
+        return HTBOTTOM;
+    if (name == "left-top")
+        return HTTOPLEFT;
+    if (name == "right-top")
+        return HTTOPRIGHT;
+    if (name == "left-bottom")
+        return HTBOTTOMLEFT;
+    if (name == "right-bottom")
+        return HTBOTTOMRIGHT;
+    return HTCLIENT;
+}
+
+bool CopyTextToClipboard(HWND hwnd, const std::wstring &text)
+{
+    if (!OpenClipboard(hwnd))
+        return false;
+    EmptyClipboard();
+
+    const SIZE_T bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!memory)
+    {
+        CloseClipboard();
+        return false;
+    }
+
+    void *destination = GlobalLock(memory);
+    if (!destination)
+    {
+        GlobalFree(memory);
+        CloseClipboard();
+        return false;
+    }
+
+    memcpy(destination, text.c_str(), bytes);
+    GlobalUnlock(memory);
+    if (!SetClipboardData(CF_UNICODETEXT, memory))
+    {
+        GlobalFree(memory);
+        CloseClipboard();
+        return false;
+    }
+
+    CloseClipboard();
+    return true;
+}
+
+std::filesystem::path StatisticsDatabasePath()
+{
+    return std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"stats.db";
+}
+
+// The local calendar day "today" is bucketed into. GetLocalTime resolves the
+// current timezone and DST, matching the Server-side aggregator's resolver.
+int LocalTodayDayKey()
+{
+    SYSTEMTIME now{};
+    GetLocalTime(&now);
+    return MsimeStats::DayKeyOf(now.wYear, now.wMonth, now.wDay);
+}
+
+json::object OverviewToJson(const MsimeStats::Overview &overview)
+{
+    json::object categories;
+    categories["cjk"] = overview.categories.cjk;
+    categories["latin"] = overview.categories.latin;
+    categories["digit"] = overview.categories.digit;
+    categories["punct"] = overview.categories.punct;
+    categories["other"] = overview.categories.other;
+
+    json::array hourly;
+    hourly.reserve(overview.today_hourly.size());
+    for (const int64_t chars : overview.today_hourly)
+        hourly.push_back(json::value(chars));
+
+    json::array daily;
+    daily.reserve(overview.daily.size());
+    for (const MsimeStats::DailyRow &row : overview.daily)
+    {
+        json::object entry;
+        entry["dayKey"] = row.day_key;
+        entry["cjk"] = row.cjk;
+        entry["latin"] = row.latin;
+        entry["digit"] = row.digit;
+        entry["punct"] = row.punct;
+        entry["other"] = row.other;
+        entry["activeMs"] = row.active_ms;
+        daily.push_back(std::move(entry));
+    }
+
+    json::object result;
+    result["hasData"] = overview.has_data;
+    result["firstDayKey"] = overview.first_day_key;
+    result["lastDayKey"] = overview.last_day_key;
+    result["days"] = overview.days;
+    result["totalChars"] = overview.total_chars;
+    result["totalActiveMs"] = overview.total_active_ms;
+    result["todayDayKey"] = overview.today_day_key;
+    result["todayChars"] = overview.today_chars;
+    result["todayActiveMs"] = overview.today_active_ms;
+    result["averagePerDay"] = overview.average_per_day;
+    result["currentStreak"] = overview.current_streak;
+    result["longestStreak"] = overview.longest_streak;
+    result["bestDayKey"] = overview.best_day_key;
+    result["bestDayChars"] = overview.best_day_chars;
+    result["todaySpeed"] = overview.today_speed;
+    result["averageSpeed"] = overview.average_speed;
+    result["fastestSpeed"] = overview.fastest_speed;
+    result["fastestDayKey"] = overview.fastest_day_key;
+    result["categories"] = std::move(categories);
+    result["todayHourly"] = std::move(hourly);
+    result["daily"] = std::move(daily);
+    return result;
+}
+
+// Handles one statistics request on the worker thread. Each request opens the
+// store, uses it and closes it: the settings process can exit at any time, the
+// store carries no cross-request state, and all requests are serialised by the
+// single serial task queue, so no in-process lock is needed. WAL plus the
+// store's busy timeout arbitrate with the Server process that writes the same
+// file.
+json::object HandleStatsRequest(const json::object &data, HWND hwnd)
+{
+    const std::string request_id = json::value_to<std::string>(data.at("requestId"));
+    const std::string action = json::value_to<std::string>(data.at("action"));
+    json::object response;
+    response["requestId"] = request_id;
+    response["action"] = action;
+    response["ok"] = true;
+    response["message"] = "成功";
+
+    if (action == "openDirectory")
+    {
+        const std::filesystem::path directory = StatisticsDatabasePath().parent_path();
+        std::error_code error_code;
+        std::filesystem::create_directories(directory, error_code);
+        ShellExecuteW(hwnd, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        response["message"] = "已打开数据目录";
+        return response;
+    }
+    if (action != "overview" && action != "clearAll")
+    {
+        response["ok"] = false;
+        response["message"] = "未知的统计操作。";
+        return response;
+    }
+
+    // The missing-file check is the observable half of "recording is off by
+    // default": Store::Open always opens with SQLITE_OPEN_CREATE, so merely
+    // browsing statistics must not create stats.db.
+    std::error_code exists_error;
+    const std::filesystem::path database_path = StatisticsDatabasePath();
+    const bool database_exists = std::filesystem::exists(database_path, exists_error) && !exists_error;
+    std::unique_ptr<MsimeStats::Store> store;
+    if (database_exists)
+    {
+        std::string error;
+        store = MsimeStats::Store::Open(database_path, error);
+        if (!store)
+        {
+            response["ok"] = false;
+            response["message"] = "无法打开统计数据库：" + error;
+            return response;
+        }
+    }
+
+    const int today = LocalTodayDayKey();
+    if (action == "clearAll")
+    {
+        int64_t removed_days = 0;
+        if (store)
+        {
+            std::string error;
+            if (!store->ClearAll(removed_days, error))
+            {
+                response["ok"] = false;
+                response["message"] = "清空统计数据失败：" + error;
+                return response;
+            }
+        }
+        response["removedDays"] = removed_days;
+        response["message"] =
+            removed_days > 0 ? "已清空 " + std::to_string(removed_days) + " 天数据" : "没有需要清空的数据";
+    }
+
+    MsimeStats::Overview overview;
+    if (store)
+    {
+        std::vector<MsimeStats::DailyRow> daily;
+        std::vector<MsimeStats::HourlyRow> hourly;
+        std::string error;
+        if (!store->DailyRows(daily, error) || !store->HourlyRows(today, hourly, error))
+        {
+            response["ok"] = false;
+            response["message"] = "读取统计数据失败：" + error;
+            return response;
+        }
+        overview = MsimeStats::ComputeOverview(daily, hourly, today);
+    }
+    else
+    {
+        // Derive the empty overview through the same path so the JSON shape is
+        // identical (24 zeroed hour buckets, zeroed categories).
+        overview = MsimeStats::ComputeOverview({}, {}, today);
+    }
+    response["overview"] = OverviewToJson(overview);
+    if (action == "overview")
+        response["message"] = "已加载统计数据";
+    return response;
+}
+
+void HandleWebMessage(HWND hwnd, ICoreWebView2WebMessageReceivedEventArgs *args)
+{
+    if (g_closing || !g_worker)
+        return;
+    wil::unique_cotaskmem_string raw;
+    if (FAILED(args->TryGetWebMessageAsString(&raw)) || !raw)
+        return;
+
+    try
+    {
+        json::value value = json::parse(wstring_to_string(raw.get()));
+        if (!metasequoia::webview::Validate(value, "client", "settings"))
+            return;
+        const std::string type = json::value_to<std::string>(value.at("type"));
+        if (type == "dragStart")
+        {
+            ReleaseCapture();
+            PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        }
+        else if (type == "resizeHitTest" || type == "resizeStart")
+        {
+            const int hit_test = HitTestName(json::value_to<std::string>(value.at("data")));
+            if (hit_test != HTCLIENT)
+            {
+                ReleaseCapture();
+                PostMessageW(hwnd, WM_NCLBUTTONDOWN, hit_test, 0);
+            }
+        }
+        else if (type == "focus")
+        {
+            SetFocus(hwnd);
+        }
+        else if (type == "windowControl")
+        {
+            const std::string command = json::value_to<std::string>(value.at("data"));
+            if (command == "minimize")
+                ShowWindow(hwnd, SW_MINIMIZE);
+            else if (command == "maximize")
+                ShowWindow(hwnd, SW_MAXIMIZE);
+            else if (command == "restore")
+                ShowWindow(hwnd, SW_RESTORE);
+            else if (command == "close")
+                HideSettings(hwnd);
+        }
+        else if (type == "maximizeButtonRect")
+        {
+            const auto &data = value.at("data").as_object();
+            const double x = data.if_contains("x") ? json::value_to<double>(*data.if_contains("x")) : 0.0;
+            const double y = data.if_contains("y") ? json::value_to<double>(*data.if_contains("y")) : 0.0;
+            const double width = data.if_contains("width") ? json::value_to<double>(*data.if_contains("width")) : 0.0;
+            const double height =
+                data.if_contains("height") ? json::value_to<double>(*data.if_contains("height")) : 0.0;
+            double scale = data.if_contains("dpr") ? json::value_to<double>(*data.if_contains("dpr")) : 0.0;
+            if (scale <= 0.0)
+                scale = static_cast<double>(GetDpiForWindow(hwnd)) / 96.0;
+            g_maximize_button_rect = {static_cast<LONG>(std::lround(x * scale)),
+                                      static_cast<LONG>(std::lround(y * scale)),
+                                      static_cast<LONG>(std::lround((x + width) * scale)),
+                                      static_cast<LONG>(std::lround((y + height) * scale))};
+            g_has_maximize_button_rect = true;
+        }
+        else if (type == "configRequest")
+        {
+            TraceStartup("ui: page configRequest (DOMContentLoaded)");
+            // A snapshot sent before the new document installed its listener may be lost.
+            g_last_config_message.clear();
+            PostConfig(false);
+            PostMessageW(hwnd, kScanSkinCatalog, 0, 0);
+        }
+        else if (type == "skinCatalogRequest")
+        {
+            g_worker->Submit([] {
+                auto completion = ConfigCompletion(true);
+                NotifyImeServerCandidateSkinRefresh();
+                return completion;
+            });
+        }
+        else if (type == "openSkinDirectory")
+        {
+            const std::filesystem::path skins = std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"skins";
+            std::error_code ec;
+            std::filesystem::create_directories(skins, ec);
+            if (!ec)
+                ShellExecuteW(hwnd, L"open", skins.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (type == "openHelpcodeDirectory")
+        {
+            const std::filesystem::path directory = metasequoia::path_from_utf8(GetCustomHelpcodeDirectory().c_str());
+            std::error_code ec;
+            std::filesystem::create_directories(directory, ec);
+            if (!ec)
+                ShellExecuteW(hwnd, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (type == "openShuangpinDirectory")
+        {
+            const std::filesystem::path directory = metasequoia::path_from_utf8(GetCustomShuangpinDirectory().c_str());
+            std::error_code ec;
+            std::filesystem::create_directories(directory, ec);
+            if (!ec)
+                ShellExecuteW(hwnd, L"open", directory.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (type == "collocationModelDownload")
+        {
+            // 后台线程下载，进度随下一次配置快照回给页面；页面在下载态轮询 configRequest。
+            // 忙碌（其他模型在下载）时 StartDownload 拒绝，页面在下载态禁用其余下载按钮。
+            collocation::StartDownload(json::value_to<std::string>(value.at("data").at("modelId")));
+            PostConfig(false);
+        }
+        else if (type == "collocationModelDelete")
+        {
+            // 下载中与当前生效解析的 id 在 DeleteModel 里拒绝；无论成败都回快照刷新列表。
+            collocation::DeleteModel(json::value_to<std::string>(value.at("data").at("modelId")));
+            PostConfig(false);
+        }
+        else if (type == "collocationModelImport")
+        {
+            // 应用内下载太慢时，用户可以用浏览器下好再导入；选择对话框在 UI 线程模态弹出，
+            // 复制与格式校验在后台线程，进度同样随快照回放（页面在 importing 态轮询）。
+            const std::string model_id = json::value_to<std::string>(value.at("data").at("modelId"));
+            const std::filesystem::path source = collocation::PromptForModelFile(hwnd);
+            if (!source.empty())
+                collocation::ImportModel(model_id, source);
+            PostConfig(false);
+        }
+        else if (type == "collocationModelStatusRequest")
+        {
+            PostConfig(false);
+        }
+        else if (type == "configUpdate")
+        {
+            const auto data = value.at("data").as_object();
+            g_worker->Submit([data] {
+                const bool saved = ApplyConfigUpdate(data);
+                auto completion = ConfigCompletion();
+                return [saved, completion = std::move(completion)] {
+                    completion();
+                    if (!saved)
+                        MessageBoxW(g_settings_hwnd, L"设置保存失败，请重试。", L"水杉输入法", MB_OK | MB_ICONWARNING);
+                };
+            });
+        }
+        else if (type == "apiCredentialTest")
+        {
+            const auto &data = value.at("data").as_object();
+            const std::string request_id = json::value_to<std::string>(data.at("requestId"));
+            ApiCredentialTest::Request request;
+            request.service = json::value_to<std::string>(data.at("service"));
+            for (const auto &[key, item] : data.at("config").as_object())
+            {
+                if (item.is_string())
+                    request.config.emplace(std::string(key), json::value_to<std::string>(item));
+            }
+            g_worker->Submit([request_id, request = std::move(request)]() -> SerialTaskQueue::Completion {
+                ApiCredentialTest::Result result;
+                try
+                {
+                    result = ApiCredentialTest::Run(request);
+                }
+                catch (...)
+                {
+                    result = {false, "测试失败：内部错误。"};
+                }
+                json::value response = {{"type", "apiCredentialTestResult"},
+                                        {"requestId", request_id},
+                                        {"ok", result.ok},
+                                        {"message", result.message},
+                                        {"protocolVersion", metasequoia::webview::Version}};
+                if (!metasequoia::webview::Validate(response, "server"))
+                    throw std::runtime_error("Invalid API credential test response");
+                auto message = string_to_wstring(json::serialize(response));
+                return [message = std::move(message)] {
+                    if (g_webview)
+                        g_webview->PostWebMessageAsJson(message.c_str());
+                };
+            });
+        }
+        else if (type == "openKeyboardPanel")
+        {
+            OpenKeyboardPanelApplication();
+        }
+        else if (type == "openHandwritingPanel")
+        {
+            OpenHandwritingPanelApplication();
+        }
+        else if (type == "restartServer")
+        {
+            if (!NotifyImeServerRestart())
+            {
+                MessageBoxW(g_settings_hwnd, L"未能重启输入法进程，请稍后重试。", L"水杉输入法",
+                            MB_OK | MB_ICONWARNING);
+            }
+        }
+        else if (type == "openExternalUrl")
+        {
+            const std::string url = json::value_to<std::string>(value.at("data"));
+            if (url.rfind("https://", 0) == 0)
+                ShellExecuteW(hwnd, L"open", string_to_wstring(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        else if (type == "copyText")
+        {
+            CopyTextToClipboard(hwnd, string_to_wstring(json::value_to<std::string>(value.at("data"))));
+        }
+        else if (type == "dictionaryRequest")
+        {
+            const auto data = value.at("data").as_object();
+            g_worker->Submit([data]() -> SerialTaskQueue::Completion {
+                json::value response;
+                try
+                {
+                    response = SettingsDictionary::HandleRequest(data);
+                }
+                catch (...)
+                {
+                    response =
+                        json::object{{"ok", false}, {"message", "词库操作失败，请重试"}, {"rows", json::array{}}};
+                }
+                auto &object = response.as_object();
+                object["type"] = "dictionaryResponse";
+                object["requestId"] = data.at("requestId");
+                object["action"] = data.at("action");
+                object["dictionary"] = data.at("dictionary");
+                object["protocolVersion"] = metasequoia::webview::Version;
+                if (!metasequoia::webview::Validate(response, "server"))
+                    throw std::runtime_error("Invalid dictionary response");
+                auto message = string_to_wstring(json::serialize(response));
+                return [message = std::move(message)] {
+                    if (g_webview)
+                        g_webview->PostWebMessageAsJson(message.c_str());
+                };
+            });
+        }
+        else if (type == "statsRequest")
+        {
+            const auto data = value.at("data").as_object();
+            g_worker->Submit([data, hwnd]() -> SerialTaskQueue::Completion {
+                json::object response;
+                try
+                {
+                    response = HandleStatsRequest(data, hwnd);
+                }
+                catch (...)
+                {
+                    response["ok"] = false;
+                    response["message"] = "统计操作失败，请重试";
+                }
+                response["requestId"] = data.at("requestId");
+                response["action"] = data.at("action");
+                response["type"] = "statsResponse";
+                response["protocolVersion"] = metasequoia::webview::Version;
+                if (!metasequoia::webview::Validate(response, "server"))
+                    throw std::runtime_error("Invalid statistics response");
+                auto message = string_to_wstring(json::serialize(response));
+                return [message = std::move(message)] {
+                    if (g_webview)
+                        g_webview->PostWebMessageAsJson(message.c_str());
+                };
+            });
+        }
+    }
+    catch (const std::exception &)
+    {
+        // Ignore malformed messages from the page; the next snapshot restores its state.
+    }
+}
+
+HRESULT EnsureCompositionTree(HWND hwnd)
+{
+    HRESULT hr = DCompositionCreateDevice(nullptr, __uuidof(IDCompositionDevice),
+                                          reinterpret_cast<void **>(g_dcomp_device.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+    hr = g_dcomp_device->CreateTargetForHwnd(hwnd, TRUE, &g_dcomp_target);
+    if (FAILED(hr))
+        return hr;
+    hr = g_dcomp_device->CreateVisual(&g_dcomp_root);
+    if (FAILED(hr))
+        return hr;
+    hr = g_dcomp_target->SetRoot(g_dcomp_root.Get());
+    if (FAILED(hr))
+        return hr;
+    return g_dcomp_device->Commit();
+}
+
+HRESULT OnControllerCreated(HWND hwnd, HRESULT result, ICoreWebView2CompositionController *controller)
+{
+    TraceStartup("ui: controller created");
+    if (FAILED(result) || !controller)
+    {
+        SettingsSplash::Dismiss();
+        return FAILED(result) ? result : E_FAIL;
+    }
+    g_composition_controller = controller;
+    if (FAILED(g_composition_controller.As(&g_controller)))
+        return E_NOINTERFACE;
+    if (FAILED(g_controller->get_CoreWebView2(&g_webview)) || !g_webview)
+        return E_FAIL;
+
+    ComPtr<ICoreWebView2Settings> settings;
+    if (SUCCEEDED(g_webview->get_Settings(&settings)))
+    {
+        settings->put_IsScriptEnabled(TRUE);
+        settings->put_AreDefaultScriptDialogsEnabled(TRUE);
+        settings->put_IsWebMessageEnabled(TRUE);
+        settings->put_AreHostObjectsAllowed(TRUE);
+        settings->put_IsZoomControlEnabled(FALSE);
+        settings->put_IsStatusBarEnabled(FALSE);
+    }
+    g_controller->put_ZoomFactor(1.0);
+
+    if (SUCCEEDED(g_webview.As(&g_webview3)))
+    {
+        // 虚拟主机名必须带保留 TLD `.example`。不带点的单标签主机名会先走一轮网络名称解析，
+        // 实测导航前要空等约 2 秒才开始加载内容。
+        const std::filesystem::path assets =
+            std::filesystem::path(CommonUtils::get_ime_data_path_w()) / "html/webview2/settings/ime-settings/dist";
+        g_webview3->SetVirtualHostNameToFolderMapping(L"imesettings.example", assets.c_str(),
+                                                      COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+        const std::filesystem::path skins = std::filesystem::path(CommonUtils::get_ime_data_path_w()) / L"skins";
+        std::error_code ec;
+        std::filesystem::create_directories(skins, ec);
+        g_webview3->SetVirtualHostNameToFolderMapping(L"candidate-skins.example", skins.c_str(),
+                                                      COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+    }
+    if (SUCCEEDED(g_controller.As(&g_controller2)))
+    {
+        ApplySettingsChromeTheme(hwnd);
+    }
+
+    HRESULT hr = EnsureCompositionTree(hwnd);
+    if (FAILED(hr))
+        return hr;
+    hr = g_composition_controller->put_RootVisualTarget(g_dcomp_root.Get());
+    if (FAILED(hr))
+        return hr;
+    g_dcomp_device->Commit();
+
+    RECT bounds{};
+    GetClientRect(hwnd, &bounds);
+    g_controller->put_Bounds(bounds);
+
+    EventRegistrationToken token{};
+    g_webview->add_ContentLoading(
+        Callback<ICoreWebView2ContentLoadingEventHandler>([](ICoreWebView2 *,
+                                                             ICoreWebView2ContentLoadingEventArgs *) -> HRESULT {
+            TraceStartup("ui: ContentLoading");
+            g_last_config_message.clear();
+            g_webview_content_started = true;
+            SettingsSplash::Dismiss();
+            return S_OK;
+        }).Get(),
+        &token);
+    g_webview->add_NavigationCompleted(
+        Callback<ICoreWebView2NavigationCompletedEventHandler>([hwnd](ICoreWebView2 *,
+                                                                      ICoreWebView2NavigationCompletedEventArgs *args)
+                                                                   -> HRESULT {
+            BOOL success = FALSE;
+            args->get_IsSuccess(&success);
+            TraceStartup("ui: NavigationCompleted");
+            SettingsSplash::Dismiss();
+            if (success)
+            {
+                PostWindowState(hwnd);
+                PostConfig();
+                ApplyWindowActivationAppearance();
+                SetFocus(hwnd);
+                if (g_open_about_on_ready)
+                {
+                    ShowAboutSection();
+                    g_open_about_on_ready = false;
+                }
+            }
+            return S_OK;
+        }).Get(),
+        &token);
+    g_webview->add_WebMessageReceived(
+        Callback<ICoreWebView2WebMessageReceivedEventHandler>([hwnd](ICoreWebView2 *,
+                                                                     ICoreWebView2WebMessageReceivedEventArgs *args)
+                                                                  -> HRESULT {
+            HandleWebMessage(hwnd, args);
+            return S_OK;
+        }).Get(),
+        &token);
+    return g_webview->Navigate(L"https://imesettings.example/index.html");
+}
+
+void InitWebView(HWND hwnd)
+{
+    TraceStartup("ui: InitWebView begin");
+    std::filesystem::path user_data = CommonUtils::get_webview2_user_data_path(L"webview2-settings");
+    TraceStartup("ui: get_webview2_user_data_path end");
+    std::error_code ec;
+    std::filesystem::create_directories(user_data, ec);
+    auto options = Make<CoreWebView2EnvironmentOptions>();
+    options->put_AdditionalBrowserArguments(L"--disable-features=TranslateUI "
+                                            L"--disable-background-networking "
+                                            L"--disable-default-apps "
+                                            L"--disable-sync "
+                                            L"--disable-prompt-on-repost "
+                                            L"--no-first-run");
+    CreateCoreWebView2EnvironmentWithOptions(
+        nullptr, user_data.c_str(), options.Get(),
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [hwnd](HRESULT result, ICoreWebView2Environment *environment) -> HRESULT {
+                TraceStartup("ui: environment created");
+                if (FAILED(result) || !environment)
+                {
+                    SettingsSplash::Dismiss();
+                    return FAILED(result) ? result : E_FAIL;
+                }
+                ComPtr<ICoreWebView2Environment3> environment3;
+                if (FAILED(environment->QueryInterface(IID_PPV_ARGS(&environment3))))
+                {
+                    SettingsSplash::Dismiss();
+                    return E_NOINTERFACE;
+                }
+                return environment3->CreateCoreWebView2CompositionController(
+                    hwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2CompositionControllerCompletedHandler>(
+                        [hwnd](HRESULT controller_result, ICoreWebView2CompositionController *controller) -> HRESULT {
+                            return OnControllerCreated(hwnd, controller_result, controller);
+                        })
+                        .Get());
+            })
+            .Get());
+}
+
+UINT32 MouseKeys(WPARAM w_param)
+{
+    UINT32 keys = COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_NONE;
+    if (w_param & MK_LBUTTON)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_LEFT_BUTTON;
+    if (w_param & MK_RBUTTON)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_RIGHT_BUTTON;
+    if (w_param & MK_MBUTTON)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_MIDDLE_BUTTON;
+    if (w_param & MK_SHIFT)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_SHIFT;
+    if (w_param & MK_CONTROL)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_CONTROL;
+    if (w_param & MK_XBUTTON1)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_X_BUTTON1;
+    if (w_param & MK_XBUTTON2)
+        keys |= COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_X_BUTTON2;
+    return keys;
+}
+
+bool ForwardMouse(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
+{
+    if (!g_composition_controller)
+        return false;
+    COREWEBVIEW2_MOUSE_EVENT_KIND kind{};
+    UINT32 data = 0;
+    switch (message)
+    {
+    case WM_MOUSEMOVE:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_MOVE;
+        break;
+    case WM_LBUTTONDOWN:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN;
+        SetFocus(hwnd);
+        break;
+    case WM_LBUTTONUP:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_UP;
+        break;
+    case WM_LBUTTONDBLCLK:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOUBLE_CLICK;
+        break;
+    case WM_RBUTTONDOWN:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_RIGHT_BUTTON_DOWN;
+        break;
+    case WM_RBUTTONUP:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_RIGHT_BUTTON_UP;
+        break;
+    case WM_RBUTTONDBLCLK:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_RIGHT_BUTTON_DOUBLE_CLICK;
+        break;
+    case WM_MBUTTONDOWN:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_MIDDLE_BUTTON_DOWN;
+        break;
+    case WM_MBUTTONUP:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_MIDDLE_BUTTON_UP;
+        break;
+    case WM_MBUTTONDBLCLK:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_MIDDLE_BUTTON_DOUBLE_CLICK;
+        break;
+    case WM_XBUTTONDOWN:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOWN;
+        data = GET_XBUTTON_WPARAM(w_param);
+        break;
+    case WM_XBUTTONUP:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_UP;
+        data = GET_XBUTTON_WPARAM(w_param);
+        break;
+    case WM_XBUTTONDBLCLK:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_X_BUTTON_DOUBLE_CLICK;
+        data = GET_XBUTTON_WPARAM(w_param);
+        break;
+    case WM_MOUSEWHEEL:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_WHEEL;
+        data = GET_WHEEL_DELTA_WPARAM(w_param);
+        break;
+    case WM_MOUSEHWHEEL:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_HORIZONTAL_WHEEL;
+        data = GET_WHEEL_DELTA_WPARAM(w_param);
+        break;
+    case WM_MOUSELEAVE:
+        kind = COREWEBVIEW2_MOUSE_EVENT_KIND_LEAVE;
+        break;
+    default:
+        return false;
+    }
+    POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+    if (message == WM_MOUSEWHEEL || message == WM_MOUSEHWHEEL)
+        ScreenToClient(hwnd, &point);
+    if (message == WM_MOUSEMOVE)
+    {
+        TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, hwnd, 0};
+        TrackMouseEvent(&track);
+    }
+    g_composition_controller->SendMouseInput(
+        kind, static_cast<COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS>(MouseKeys(w_param)), data, point);
+    return true;
+}
+
+bool IsMaximizeButton(HWND hwnd, POINT screen_point)
+{
+    if (!g_has_maximize_button_rect)
+        return false;
+    ScreenToClient(hwnd, &screen_point);
+    return PtInRect(&g_maximize_button_rect, screen_point) != FALSE;
+}
+
+int TopNonClientInset(HWND hwnd)
+{
+    const UINT dpi = GetDpiForWindow(hwnd);
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_STYLE));
+    const DWORD ex_style = static_cast<DWORD>(GetWindowLongPtrW(hwnd, GWL_EXSTYLE));
+    RECT caption{}, no_caption{};
+    AdjustWindowRectExForDpi(&caption, style, FALSE, ex_style, dpi);
+    AdjustWindowRectExForDpi(&no_caption, style & ~WS_CAPTION, FALSE, ex_style, dpi);
+    return no_caption.top - caption.top + GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) +
+           GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+}
+
+// 首帧之前隐藏 WebView2 会卡住 raster 初始化，预热阶段不要碰可见性。
+void SetWebViewVisible(bool visible)
+{
+    if (g_controller && g_webview_content_started)
+        g_controller->put_IsVisible(visible ? TRUE : FALSE);
+}
+
+// 驻留期间让 WebView2 按低内存目标释放缓存和 GPU 资源，重新露面时恢复正常。
+void SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL level)
+{
+    ComPtr<ICoreWebView2_19> webview19;
+    if (g_webview && SUCCEEDED(g_webview.As(&webview19)))
+        webview19->put_MemoryUsageTargetLevel(level);
+}
+
+// 重新露面：取消延迟退出，恢复渲染与配置轮询。
+void CancelLinger(HWND hwnd)
+{
+    if (!g_lingering)
+        return;
+    g_lingering = false;
+    KillTimer(hwnd, kLingerTimer);
+    SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL);
+    if (g_webview3)
+        g_webview3->Resume();
+    SetWebViewVisible(true);
+    SetTimer(hwnd, kConfigReloadTimer, 300, nullptr);
+}
+
+void ActivateWindow(HWND hwnd)
+{
+    if (g_closing)
+        return;
+    CancelLinger(hwnd);
+    if (IsIconic(hwnd))
+        ShowWindow(hwnd, SW_RESTORE);
+    else
+        ShowWindow(hwnd, SW_SHOW);
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
+}
+
+// 驻留时长（毫秒）：0 表示关闭即退出，std::nullopt 表示一直驻留。
+std::optional<UINT> SettingsLingerTimeoutMs(const std::string &linger)
+{
+    if (linger == "forever")
+        return std::nullopt;
+    if (linger == "off")
+        return 0u;
+    unsigned minutes = 10;
+    if (linger == "1m")
+        minutes = 1;
+    else if (linger == "5m")
+        minutes = 5;
+    else if (linger == "30m")
+        minutes = 30;
+    else if (linger == "60m")
+        minutes = 60;
+    return minutes * 60u * 1000u;
+}
+
+// 用户关闭窗口时走这里：只隐藏，进程继续持有导航完成的 WebView2，驻留到
+// appearance.settings_window_linger 指定的时长才真正退出，驻留期间重新打开不用再冷启动。
+// 隐藏期间停掉配置轮询、让 controller 不可见并冻结页面，避免白拿 CPU 和内存。
+// 首帧还没出来就被关掉，说明用户不想等这次冷启动，直接退出，别留一个半初始化的进程。
+void HideSettings(HWND hwnd)
+{
+    if (g_closing)
+        return;
+    const std::optional<UINT> linger_ms = SettingsLingerTimeoutMs(g_settings_window_linger);
+    if (!g_webview_content_started || linger_ms == 0u)
+    {
+        CloseSettings(hwnd);
+        return;
+    }
+    if (g_lingering)
+    {
+        ShowWindow(hwnd, SW_HIDE);
+        return;
+    }
+    g_lingering = true;
+    // 窗口隐藏时保留的那一帧会在下次打开时先显示出来，带着高亮的标题栏按钮就会闪一下。
+    // 页面自己的关闭按钮已经在点击时清过，这里覆盖 Alt+F4、启动图的关闭按钮等不经过页面的路径。
+    ResetTitlebarHoverAfterVisibilityChange();
+    // 隐藏的窗口收不到 WM_NCMOUSELEAVE，本地这份悬停状态要手动清掉，
+    // 否则下次真的移进去时不会再发 enter。
+    g_maximize_button_hover = false;
+    KillTimer(hwnd, kConfigReloadTimer);
+    SettingsSplash::Dismiss();
+    ShowWindow(hwnd, SW_HIDE);
+    SetWebViewVisible(false);
+    // TrySuspend 要求 controller 已不可见；冻结页面脚本和定时器，重开时由 CancelLinger 的 Resume 恢复。
+    SetWebViewMemoryTarget(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW);
+    if (g_webview3)
+        g_webview3->TrySuspend(
+            Callback<ICoreWebView2TrySuspendCompletedHandler>([](HRESULT, BOOL) -> HRESULT { return S_OK; }).Get());
+    if (linger_ms)
+        SetTimer(hwnd, kLingerTimer, *linger_ms, nullptr);
+}
+
+void CloseSettings(HWND hwnd)
+{
+    if (g_closing)
+        return;
+    g_closing = true;
+    g_lingering = false;
+    KillTimer(hwnd, kLingerTimer);
+    KillTimer(hwnd, kConfigReloadTimer);
+    SettingsSplash::Dismiss();
+    ShowWindow(hwnd, SW_HIDE);
+    if (g_worker)
+        g_worker->Stop();
+    else
+        DestroyWindow(hwnd);
+}
+
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_param)
+{
+    switch (message)
+    {
+    case kActivateExistingWindow:
+        ActivateWindow(hwnd);
+        return 0;
+    case kOpenAboutSection:
+        ActivateWindow(hwnd);
+        ShowAboutSection();
+        return 0;
+    case kScanSkinCatalog:
+        PostConfig(true);
+        return 0;
+    case WM_NCCALCSIZE:
+        if (w_param)
+        {
+            auto *params = reinterpret_cast<NCCALCSIZE_PARAMS *>(l_param);
+            const LRESULT result = DefWindowProcW(hwnd, message, w_param, l_param);
+            params->rgrc[0].top -= IsZoomed(hwnd) ? GetSystemMetrics(SM_CYCAPTION) : TopNonClientInset(hwnd);
+            return result;
+        }
+        break;
+    case WM_NCHITTEST: {
+        const LRESULT result = DefWindowProcW(hwnd, message, w_param, l_param);
+        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        return result == HTCLIENT && IsMaximizeButton(hwnd, point) ? HTMAXBUTTON : result;
+    }
+    case WM_MOVE:
+    case WM_MOVING:
+        if (g_controller)
+            g_controller->NotifyParentWindowPositionChanged();
+        if (SettingsSplash::IsVisible())
+            SettingsSplash::SyncToOwner();
+        break;
+    case WM_SETFOCUS:
+        if (g_controller)
+            g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        break;
+    case WM_ACTIVATE: {
+        const bool active = LOWORD(w_param) != WA_INACTIVE;
+        if (g_window_active != active)
+        {
+            g_window_active = active;
+            ApplyWindowActivationAppearance();
+        }
+        if (active)
+        {
+            if (g_webview3)
+                g_webview3->Resume();
+            if (g_controller)
+                g_controller->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+        }
+        break;
+    }
+    case WM_MOUSEMOVE:
+    case WM_MOUSELEAVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    case WM_XBUTTONDBLCLK:
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+        if (ForwardMouse(hwnd, message, w_param, l_param))
+            return (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK) ? TRUE : 0;
+        break;
+    case WM_SETCURSOR:
+        if (g_composition_controller && LOWORD(l_param) == HTCLIENT)
+        {
+            UINT32 cursor = 0;
+            if (SUCCEEDED(g_composition_controller->get_SystemCursorId(&cursor)) && cursor)
+            {
+                SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(cursor)));
+                return TRUE;
+            }
+        }
+        break;
+    case WM_NCMOUSEMOVE: {
+        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        if (IsMaximizeButton(hwnd, point))
+        {
+            if (!g_maximize_button_hover)
+            {
+                g_maximize_button_hover = true;
+                PostMaximizeButtonEvent("enter");
+            }
+            TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE | TME_NONCLIENT, hwnd, 0};
+            TrackMouseEvent(&track);
+            return 0;
+        }
+        break;
+    }
+    case WM_NCMOUSELEAVE:
+        if (g_maximize_button_hover)
+        {
+            g_maximize_button_hover = false;
+            PostMaximizeButtonEvent("leave");
+        }
+        break;
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONUP: {
+        POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
+        if (IsMaximizeButton(hwnd, point))
+        {
+            PostMaximizeButtonEvent(message == WM_NCLBUTTONDOWN ? "down" : "up");
+            return 0;
+        }
+        break;
+    }
+    case WM_ERASEBKGND: {
+        RECT client{};
+        GetClientRect(hwnd, &client);
+        const bool light = g_settings_light;
+        HBRUSH brush = CreateSolidBrush(light ? RGB(243, 243, 243) : RGB(32, 32, 32));
+        FillRect(reinterpret_cast<HDC>(w_param), &client, brush);
+        DeleteObject(brush);
+        return 1;
+    }
+    case WM_GETMINMAXINFO: {
+        auto *info = reinterpret_cast<MINMAXINFO *>(l_param);
+        const UINT dpi = GetDpiForWindow(hwnd);
+        info->ptMinTrackSize = {MulDiv(600, dpi, 96), MulDiv(400, dpi, 96)};
+        return 0;
+    }
+    case WM_SIZE: {
+        const bool minimized = w_param == SIZE_MINIMIZED;
+        if (minimized || g_window_minimized)
+            ResetTitlebarHoverAfterVisibilityChange();
+        g_window_minimized = minimized;
+        if (g_controller)
+        {
+            RECT bounds{};
+            GetClientRect(hwnd, &bounds);
+            g_controller->put_Bounds(bounds);
+            PostWindowState(hwnd);
+        }
+        if (SettingsSplash::IsVisible())
+            SettingsSplash::SyncToOwner();
+        break;
+    }
+    case WM_TIMER:
+        if (w_param == kLingerTimer)
+        {
+            CloseSettings(hwnd);
+            return 0;
+        }
+        if (w_param == kConfigReloadTimer && g_worker && !g_closing && !g_reload_pending)
+        {
+            g_reload_pending = true;
+            g_worker->Submit([] {
+                SerialTaskQueue::Completion completion;
+                try
+                {
+                    if (ReloadImeConfigIfChanged())
+                        completion = ConfigCompletion();
+                }
+                catch (...)
+                { /* Retry on the next timer tick; do not poison the queue. */
+                }
+                return [completion = std::move(completion)] {
+                    g_reload_pending = false;
+                    if (completion)
+                        completion();
+                };
+            });
+        }
+        return 0;
+    case kWorkerCompleted:
+        if (g_worker)
+        {
+            g_worker->Drain(!g_closing);
+            if (g_closing && g_worker->Stopped())
+                DestroyWindow(hwnd);
+        }
+        return 0;
+    case WM_CLOSE:
+        HideSettings(hwnd);
+        return 0;
+    case kQuitSettings:
+        CloseSettings(hwnd);
+        return 0;
+    case WM_DESTROY:
+        g_closing = true;
+        g_lingering = false;
+        if (g_worker)
+            g_worker->Stop();
+        KillTimer(hwnd, kLingerTimer);
+        KillTimer(hwnd, kConfigReloadTimer);
+        SettingsSplash::Dismiss();
+        g_webview.Reset();
+        g_controller2.Reset();
+        g_controller.Reset();
+        g_composition_controller.Reset();
+        g_dcomp_root.Reset();
+        g_dcomp_target.Reset();
+        g_dcomp_device.Reset();
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, w_param, l_param);
+}
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command_line, int show_command)
+{
+    TraceStartup("wWinMain");
+    g_open_about_on_ready = command_line && std::wstring(command_line).find(L"--about") != std::wstring::npos;
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(com_result))
+        return 1;
+
+    CommonUtils::SingleInstanceGuard single_instance(kSingleInstanceMutex);
+    if (!single_instance.is_valid())
+        return 1;
+    if (single_instance.already_running())
+    {
+        HWND existing = FindWindowW(kWindowClass, nullptr);
+        if (existing)
+        {
+            PostMessageW(existing, g_open_about_on_ready ? kOpenAboutSection : kActivateExistingWindow, 0, 0);
+            SetForegroundWindow(existing);
+        }
+        return 0;
+    }
+
+    WNDCLASSEXW window_class{sizeof(window_class)};
+    window_class.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
+    window_class.lpfnWndProc = WindowProc;
+    window_class.hInstance = instance;
+    window_class.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_IME_ICON));
+    window_class.hIconSm = LoadIconW(instance, MAKEINTRESOURCEW(IDI_SETTINGS_ICON));
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    window_class.lpszClassName = kWindowClass;
+    if (!RegisterClassExW(&window_class))
+        return 1;
+
+    const UINT dpi = GetDpiForSystem();
+    const int width = MulDiv(900, dpi, 96);
+    const int height = MulDiv(710, dpi, 96);
+    const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
+    const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+    HWND hwnd = CreateWindowExW(0, kWindowClass, kWindowTitle, WS_OVERLAPPEDWINDOW, x, y, width, height, nullptr,
+                                nullptr, instance, nullptr);
+    if (!hwnd)
+        return 1;
+    g_settings_hwnd = hwnd;
+    g_worker = std::make_unique<SerialTaskQueue>(
+        [hwnd] { PostMessageW(hwnd, kWorkerCompleted, 0, 0); },
+        [] { MessageBoxW(g_settings_hwnd, L"设置操作失败，请重试。", L"水杉输入法", MB_OK | MB_ICONWARNING); },
+        [] {
+            if (g_worker_com_initialized)
+                CoUninitialize();
+        });
+    auto initial_theme = std::make_shared<std::promise<bool>>();
+    std::future<bool> initial_light = initial_theme->get_future();
+    g_worker->Submit([initial_theme] {
+        g_worker_com_initialized = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
+        TraceStartup("worker: InitImeConfig begin");
+        InitImeConfig();
+        TraceStartup("worker: InitImeConfig end");
+        initial_theme->set_value(ResolveConfiguredTheme(GetConfiguredThemeSettings()) == "light");
+        return ConfigCompletion();
+    });
+    // 配置加载通常只要几毫秒，先短暂等它拿到主题再画窗口框架和 splash，免得浅色主题先闪一下深色。
+    // 等不到就按深色先亮出来，之后由 ConfigCompletion 切换。
+    if (initial_light.wait_for(std::chrono::milliseconds(150)) == std::future_status::ready)
+    {
+        try
+        {
+            g_settings_light = initial_light.get();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+    DWM_SYSTEMBACKDROP_TYPE backdrop = DWMSBT_NONE;
+    ApplySettingsChromeTheme(hwnd);
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+    DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
+    MARGINS margins{};
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+    // CreateWindow sends the initial WM_NCCALCSIZE before the DWM/custom-frame
+    // attributes above are installed. Force a second frame calculation now;
+    // otherwise the native caption remains until the first minimize/restore.
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    SetTimer(hwnd, kConfigReloadTimer, 300, nullptr);
+    // 先把窗口和 splash 亮出来，再做 WebView2 用户数据目录的准备和 environment 创建。
+    ShowWindow(hwnd, show_command == SW_HIDE ? SW_SHOWNORMAL : show_command);
+    UpdateWindow(hwnd);
+    SettingsSplash::Show(hwnd, g_settings_light);
+    TraceStartup("ui: window + splash shown");
+    InitWebView(hwnd);
+    TraceStartup("ui: InitWebView returned");
+    if (g_webview_content_started)
+        SettingsSplash::Dismiss();
+
+    MSG message{};
+    while (GetMessageW(&message, nullptr, 0, 0) > 0)
+    {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    g_worker.reset(); // Drain accepted writes even if the window was destroyed externally.
+    CoUninitialize();
+    return static_cast<int>(message.wParam);
+}

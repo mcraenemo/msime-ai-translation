@@ -1,0 +1,497 @@
+// 通用功能开关：诊断日志、输入统计、中英与表情混输、候选翻译、云候选、整句联想、各工具模式与剪贴板历史。
+#include "config/ime_config_internal.h"
+#include <atomic>
+#include <string>
+#include "clipboard/clipboard_history.h"
+#include "statistics/stats_store.h"
+
+using namespace ime_config_detail;
+
+bool GetConfiguredDiagnosticLogEnabled()
+{
+    return g_diagnostic_log_enabled.load(std::memory_order_relaxed);
+}
+
+bool SetConfiguredDiagnosticLogEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "diagnostic_log", enabled ? "true" : "false"))
+        return false;
+    g_diagnostic_log_enabled.store(enabled, std::memory_order_relaxed);
+    return true;
+}
+
+bool GetConfiguredTsfDiagnosticLogEnabled()
+{
+    return g_tsf_diagnostic_log_enabled.load(std::memory_order_relaxed);
+}
+
+bool SetConfiguredTsfDiagnosticLogEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "tsf_diagnostic_log", enabled ? "true" : "false"))
+        return false;
+    g_tsf_diagnostic_log_enabled.store(enabled, std::memory_order_relaxed);
+    return true;
+}
+
+bool GetConfiguredStatisticsEnabled()
+{
+    return g_statistics_enabled.load(std::memory_order_relaxed);
+}
+
+bool SetConfiguredStatisticsEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("statistics", "enabled", enabled ? "true" : "false"))
+        return false;
+    g_statistics_enabled.store(enabled, std::memory_order_relaxed);
+    return true;
+}
+
+const std::string &GetConfiguredStatisticsRetention()
+{
+    return g_statistics_retention;
+}
+
+bool SetConfiguredStatisticsRetention(const std::string &retention)
+{
+    // 先校验后落盘：非法枚举不写文件也不动内存值，设置页的请求会被静默拒绝。
+    MsimeStats::Retention parsed = MsimeStats::Retention::Forever;
+    if (!MsimeStats::ParseRetention(retention, parsed))
+        return false;
+    if (!WriteConfiguredValue("statistics", "retention", EscapeTomlBasicString(retention)))
+        return false;
+    g_statistics_retention = retention;
+    return true;
+}
+
+bool GetConfiguredEnglishCandidatesEnabled()
+{
+    return g_english_candidates_enabled;
+}
+
+bool SetConfiguredEnglishCandidatesEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "cn_en_mixed_input", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_english_candidates_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredCandidateTranslationsEnabled()
+{
+    return g_candidate_translations_enabled;
+}
+
+bool SetConfiguredCandidateTranslationsEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "candidate_translations", enabled ? "true" : "false"))
+        return false;
+    g_candidate_translations_enabled = enabled;
+    return true;
+}
+
+int GetConfiguredEnglishMixedInputMinChars()
+{
+    return g_english_mixed_input_min_chars;
+}
+
+bool SetConfiguredEnglishMixedInputMinChars(int min_chars)
+{
+    if (min_chars < kEnglishMixedInputMinCharsMin || min_chars > kEnglishMixedInputMinCharsMax)
+        return false;
+    if (!WriteConfiguredValue("general", "cn_en_mixed_input_min_chars", std::to_string(min_chars)))
+        return false;
+    g_english_mixed_input_min_chars = min_chars;
+    return true;
+}
+
+bool GetConfiguredEmojiMixedInputEnabled()
+{
+    return g_emoji_mixed_input_enabled;
+}
+
+bool SetConfiguredEmojiMixedInputEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "emoji_mixed_input", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_emoji_mixed_input_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredKaomojiMixedInputEnabled()
+{
+    return g_kaomoji_mixed_input_enabled;
+}
+
+bool SetConfiguredKaomojiMixedInputEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "kaomoji_mixed_input", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_kaomoji_mixed_input_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredCloudCandidatesEnabled()
+{
+    return g_cloud_candidates_enabled;
+}
+
+bool SetConfiguredCloudCandidatesEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("general", "cloud_candidates", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_cloud_candidates_enabled = enabled;
+    return true;
+}
+
+// 整句候选来源与去重补位开关的 getter / setter。写入 [association] 段，值域为布尔。
+bool GetConfiguredAssocSentenceWordLattice()
+{
+    return g_assoc_sentence_wordlattice;
+}
+bool SetConfiguredAssocSentenceWordLattice(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_wordlattice", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_wordlattice = enabled;
+    return true;
+}
+
+bool GetConfiguredAssocSentenceGoogle()
+{
+    return g_assoc_sentence_google;
+}
+bool SetConfiguredAssocSentenceGoogle(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_google", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_google = enabled;
+    return true;
+}
+
+bool GetConfiguredAssocSentenceNeuralDesktop()
+{
+    return g_assoc_sentence_neural_desktop;
+}
+bool SetConfiguredAssocSentenceNeuralDesktop(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_neural_desktop", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_neural_desktop = enabled;
+    return true;
+}
+
+bool GetConfiguredAssocSentenceNeuralKeyboard()
+{
+    return g_assoc_sentence_neural_keyboard;
+}
+bool SetConfiguredAssocSentenceNeuralKeyboard(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_neural_keyboard", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_neural_keyboard = enabled;
+    return true;
+}
+
+// octagram 语法模型总开关。开启时解码期叠加字级搭配分，并在 n-best 上重排出整句来源行
+// （标签由模型包自带：万象〔万象〕、八股文〔八股〕、白霜〔墨奇〕）。引擎侧加成没有独立
+// 开关——它由 collocation_model 非空隐含开启，所以单个键就够。
+bool GetConfiguredAssocSentenceCollocationEnabled()
+{
+    return g_assoc_sentence_collocation_enabled;
+}
+bool SetConfiguredAssocSentenceCollocationEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_collocation_enabled", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_collocation_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredAssocSentenceCollocationRerankWeight()
+{
+    return g_assoc_sentence_collocation_rerank_weight;
+}
+
+std::string GetConfiguredAssocSentenceCollocationModel()
+{
+    return g_assoc_sentence_collocation_model;
+}
+
+// 激活某个 octagram 模型包（单选）。空串 = 未选择任何模型（整句加成关闭），设置页单选
+// 其他包时写入该包 id。写入经配置三重传导到 Server，下一次击键 ApplyConfiguration 即
+// 生效，无需重启。
+bool SetConfiguredAssocSentenceCollocationModel(const std::string &model_id)
+{
+    if (!WriteConfiguredValue("association", "sentence_collocation_model", EscapeTomlBasicString(model_id)))
+    {
+        return false;
+    }
+    g_assoc_sentence_collocation_model = model_id;
+    return true;
+}
+
+double GetConfiguredAssocSentenceCollocationWeight()
+{
+    return g_assoc_sentence_collocation_weight;
+}
+
+bool GetConfiguredAssocSentenceShowNextOnDuplicate()
+{
+    return g_assoc_sentence_show_next_on_duplicate;
+}
+bool SetConfiguredAssocSentenceShowNextOnDuplicate(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_show_next_on_duplicate", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_show_next_on_duplicate = enabled;
+    return true;
+}
+
+// 只影响候选窗展示，组页时读取，不需要重建引擎会话。
+bool GetConfiguredAssocSentenceSourceBadge()
+{
+    return g_assoc_sentence_source_badge;
+}
+bool SetConfiguredAssocSentenceSourceBadge(bool enabled)
+{
+    if (!WriteConfiguredValue("association", "sentence_source_badge", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_assoc_sentence_source_badge = enabled;
+    return true;
+}
+
+bool GetConfiguredUnicodeModeEnabled()
+{
+    return g_unicode_mode_enabled;
+}
+
+bool SetConfiguredUnicodeModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "unicode_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_unicode_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredQuickPhraseEnabled()
+{
+    return g_quick_phrase_enabled;
+}
+
+bool SetConfiguredQuickPhraseEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "quick_phrase", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_quick_phrase_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredQuickPhraseCandidatesEnabled()
+{
+    return g_quick_phrase_candidates_enabled;
+}
+
+bool SetConfiguredQuickPhraseCandidatesEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "quick_phrase_candidates", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_quick_phrase_candidates_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredQuickPhraseFrequencyEnabled()
+{
+    return g_quick_phrase_frequency_enabled;
+}
+
+bool SetConfiguredQuickPhraseFrequencyEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "quick_phrase_frequency", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_quick_phrase_frequency_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredMixedCandidatesEnabled()
+{
+    return g_mixed_candidates_enabled;
+}
+
+bool SetConfiguredMixedCandidatesEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "mixed_candidates", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_mixed_candidates_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredDateTimeCandidatesEnabled()
+{
+    return g_date_time_candidates_enabled;
+}
+
+bool SetConfiguredDateTimeCandidatesEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "date_time_candidates", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_date_time_candidates_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredDateTimeMenuEnabled()
+{
+    return g_date_time_menu_enabled;
+}
+
+bool SetConfiguredDateTimeMenuEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "date_time_menu", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_date_time_menu_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredDateTimeModeEnabled()
+{
+    return g_date_time_mode_enabled;
+}
+
+bool SetConfiguredDateTimeModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "date_time_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_date_time_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredEmojiModeEnabled()
+{
+    return g_emoji_mode_enabled;
+}
+
+bool SetConfiguredEmojiModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "emoji_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_emoji_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredKaomojiModeEnabled()
+{
+    return g_kaomoji_mode_enabled;
+}
+
+bool SetConfiguredKaomojiModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "kaomoji_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_kaomoji_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredJianpinModeEnabled()
+{
+    return g_jianpin_mode_enabled;
+}
+
+bool SetConfiguredJianpinModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "jianpin_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_jianpin_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredYModeEnabled()
+{
+    return g_y_mode_enabled;
+}
+
+bool SetConfiguredYModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "y_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_y_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredRModeEnabled()
+{
+    return g_r_mode_enabled;
+}
+
+bool SetConfiguredRModeEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "r_mode", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    g_r_mode_enabled = enabled;
+    return true;
+}
+
+bool GetConfiguredClipboardHistoryEnabled()
+{
+    return g_clipboard_history_enabled;
+}
+
+bool SetConfiguredClipboardHistoryEnabled(bool enabled)
+{
+    if (!WriteConfiguredValue("utility", "clipboard_history", enabled ? "true" : "false"))
+    {
+        return false;
+    }
+    const bool was_enabled = g_clipboard_history_enabled;
+    g_clipboard_history_enabled = enabled;
+    if (was_enabled && !enabled)
+        ClipboardHistory::Clear();
+    ClipboardMonitor::Sync(enabled);
+    return true;
+}

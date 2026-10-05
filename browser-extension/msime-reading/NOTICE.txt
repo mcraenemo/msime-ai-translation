@@ -1,0 +1,4 @@
+水杉阅读翻译基于 MetasequoiaIME 原项目扩展。
+原项目及原作者团队：https://github.com/metasequoiaime/msime
+原输入法由 MetasequoiaIME 团队和贡献者开发；本分支仅增加翻译等扩展功能。
+许可：GPL-3.0，见 LICENSE。使用、修改及分发应保留原项目和贡献者归属。

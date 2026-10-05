@@ -1,0 +1,142 @@
+.wnd-h {
+  /* Preview card is narrower than a real candwnd host; constrain to parent. */
+  max-width: 100%;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+
+  /* skin.ts 在 .candidate 与 .container 之间插的包装层。它在列向 flex 里不被拉伸，宽度取内容的
+     fit-content；只要哪个皮肤给 .container 写了 max-content 之类的宽度，它的 min-content 就等于整行
+     候选的宽度，.container 的 max-width: 100% 跟着失效，预览会冲出卡片。在这一层把宽度钉死在宿主内，
+     任何皮肤（包括外部皮肤生成的规则）都只能在这个宽度里换行。 */
+  .containerParent {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .container {
+    margin-top: 0px;
+    margin-left: 0px;
+    background: var(--cand-bg);
+    border-radius: 6px;
+    box-shadow: var(--cand-shadow);
+    /* 同候选窗 fluent 横排：加上 .row 的上 2px、下 1px 外边距后，高亮与外框内缘四周都留 3px。 */
+    padding: 1px 3px 2px;
+    min-width: 7em;
+    /* Allow wrapping so the sample row is not clipped in settings preview.
+       Live candwnd keeps nowrap separately. */
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    user-select: none;
+    border: 1.5px solid var(--cand-border);
+  }
+
+  .cursor {
+    display: inline-block;
+    margin-left: 1px;
+    width: 1.5px;
+    height: 1.2em;
+    background: var(--accent-strong);
+    transform: translateY(10%);
+  }
+
+  .row {
+    justify-content: space-between;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 2px;
+    margin-bottom: 1px;
+  }
+
+  .cand {
+    border-radius: 4px;
+    padding: 2px 4px 2px 0;
+  }
+
+  .cand:not(.first):hover {
+    background-color: var(--cand-hover);
+  }
+
+  .row-wrapper {
+    position: relative;
+    display: inline-block;
+    vertical-align: top;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .first-row-wrapper {
+    margin-left: 0;
+  }
+
+  .first {
+    position: relative;
+    background-color: var(--cand-selected);
+    border-radius: 4px;
+  }
+
+  /* bar */
+  .first::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 53%;
+    transform: translateY(-50%);
+    height: 0.8em;
+    width: 0.2em;
+    background: var(--accent-strong);
+    border-radius: 8px;
+  }
+
+  .text {
+    padding-left: calc(0.2em + 3px);
+    padding-right: 5px;
+    color: var(--cand-text);
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .cand .text {
+    padding-left: calc(0.2em + 3px);
+    padding-right: 4px;
+    line-height: 1.25;
+  }
+
+  .num {
+    font-size: 0.8em;
+    color: var(--cand-num);
+    margin-right: 0;
+  }
+
+  .pinyin {
+    font-size: 14px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0;
+  }
+
+  .hidden-pinyin {
+    visibility: hidden;
+  }
+}
+
+/* 同候选窗 fluent 横排：首项、尾项落在外框四角上的高亮角与外框同为 6px；其余内置皮肤在 skin.css 自带规则。 */
+.wnd-h:not(.skin-wechat, .skin-graphite, .skin-willow-green, .skin-autumn-osmanthus, .skin-microsoft) {
+  .container > .pinyin + .row-wrapper > .cand { border-bottom-left-radius: 6px; }
+  .container.preedit-hidden > .pinyin + .row-wrapper > .cand { border-top-left-radius: 6px; }
+  .container > .row-wrapper:is(:last-child, .last-visible) > .cand { border-bottom-right-radius: 6px; }
+  .container.preedit-hidden > .row-wrapper:is(:last-child, .last-visible) > .cand { border-top-right-radius: 6px; }
+}

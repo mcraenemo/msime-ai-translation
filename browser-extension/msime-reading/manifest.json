@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "水杉阅读翻译",
+  "version": "1.0.0",
+  "description": "右键翻译选中文字，复用本机 MSIME 的 API 配置和本地缓存。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAu7kuab+W5S26kHw9a7po9zA9CZYKUOERyH9i1QiRmDQ/YbXF53Gg34ZtMKSy+ynz0iHcOgWyDzapuWVHuBbsNHaC23pzTi6kQTgzpIDk/u9yQrUYLO2ZDZtPE+qa9IFDsr5X9ALDJys5PYBK/un0RcWEhGHyn+MnDgLEi10yh3+qdCzOS6VYBZWPXbIzOLNd6Gt9rYm5+ALg9W6jUrqUURntrH4MDQ+JOus6VAnMcvmSRPQHxETB7HrnGcCTkQqck9splLwfcJy1NYHaohweoJpJTkeG7NNxEkZIs683zUq8hwNK0RLVCQRizuwJOyL4K1TDb/FThffMG9j9SpwVxwIDAQAB",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "activeTab",
+    "scripting"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "水杉阅读翻译"
+  }
+}

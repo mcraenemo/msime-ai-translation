@@ -1,0 +1,478 @@
+<div class="content" id="ai-assistant-settings">
+  <div class="content-header"><span>AI 辅助</span></div>
+  <div class="section ai-section">
+    <div class="section-header">
+      <div><div class="section-title">AI 长句翻译</div><div class="ai-description">中文选词先累计到待翻译句子；仅按 Ctrl+Enter 才翻译并上屏。独立于 AI 联想，复用下方 API 配置；先查本地缓存，未命中才请求 AI。</div></div>
+      <div class="ftb-toggle-btn" id="aiTranslationEnabled" role="switch" aria-checked="false" tabindex="0"><div class="ftb-toggle-knob"></div></div>
+    </div>
+    <div class="ai-grid">
+      <label><span>发送目标语言</span><select id="aiTranslationTarget">
+        <option value="en">英语</option>
+        <option value="tl">菲律宾语 / 他加禄语</option>
+        <option value="ja">日语</option>
+        <option value="ko">韩语</option>
+        <option value="zh-Hans">简体中文</option>
+        <option value="zh-Hant">繁体中文</option>
+        <option value="es">西班牙语</option>
+        <option value="fr">法语</option>
+        <option value="de">德语</option>
+        <option value="ru">俄语</option>
+        <option value="ar">阿拉伯语</option>
+        <option value="pt">葡萄牙语</option>
+        <option value="hi">印地语</option>
+        <option value="id">印度尼西亚语</option>
+        <option value="vi">越南语</option>
+        <option value="th">泰语</option>
+        <option value="ms">马来语</option>
+        <option value="ab">阿布哈西亚语</option>
+        <option value="sq">阿尔巴尼亚语</option>
+        <option value="aa">阿法尔语</option>
+        <option value="ak">阿肯语</option>
+        <option value="tw">阿肯语</option>
+        <option value="an">阿拉贡语</option>
+        <option value="am">阿姆哈拉语</option>
+        <option value="as">阿萨姆语</option>
+        <option value="az">阿塞拜疆语</option>
+        <option value="av">阿瓦尔语</option>
+        <option value="ae">阿维斯塔语</option>
+        <option value="ee">埃维语</option>
+        <option value="ay">艾马拉语</option>
+        <option value="ga">爱尔兰语</option>
+        <option value="et">爱沙尼亚语</option>
+        <option value="oj">奥吉布瓦语</option>
+        <option value="oc">奥克语</option>
+        <option value="or">奥里亚语</option>
+        <option value="om">奥罗莫语</option>
+        <option value="os">奥塞梯语</option>
+        <option value="pi">巴利语</option>
+        <option value="ba">巴什基尔语</option>
+        <option value="eu">巴斯克语</option>
+        <option value="be">白俄罗斯语</option>
+        <option value="bm">班巴拉语</option>
+        <option value="bg">保加利亚语</option>
+        <option value="nd">北恩德贝勒语</option>
+        <option value="se">北方萨米语</option>
+        <option value="bi">比斯拉马语</option>
+        <option value="is">冰岛语</option>
+        <option value="pl">波兰语</option>
+        <option value="bs">波斯尼亚语</option>
+        <option value="fa">波斯语</option>
+        <option value="bh">博杰普尔语</option>
+        <option value="br">布列塔尼语</option>
+        <option value="bo">藏语</option>
+        <option value="ch">查莫罗语</option>
+        <option value="ce">车臣语</option>
+        <option value="cv">楚瓦什语</option>
+        <option value="tn">茨瓦纳语</option>
+        <option value="ts">聪加语</option>
+        <option value="tt">鞑靼语</option>
+        <option value="da">丹麦语</option>
+        <option value="dv">迪维希语</option>
+        <option value="ng">恩东加语</option>
+        <option value="fo">法罗语</option>
+        <option value="sa">梵语</option>
+        <option value="fj">斐济语</option>
+        <option value="fi">芬兰语</option>
+        <option value="ff">富拉语</option>
+        <option value="kg">刚果语</option>
+        <option value="km">高棉语</option>
+        <option value="kl">格陵兰语</option>
+        <option value="ka">格鲁吉亚语</option>
+        <option value="gu">古吉拉特语</option>
+        <option value="gn">瓜拉尼语</option>
+        <option value="ie">国际文字（E）</option>
+        <option value="ia">国际语</option>
+        <option value="kk">哈萨克语</option>
+        <option value="ht">海地克里奥尔语</option>
+        <option value="ha">豪萨语</option>
+        <option value="nl">荷兰语</option>
+        <option value="hz">赫雷罗语</option>
+        <option value="ki">吉库尤语</option>
+        <option value="gl">加利西亚语</option>
+        <option value="ca">加泰罗尼亚语</option>
+        <option value="cu">教会斯拉夫语</option>
+        <option value="cs">捷克语</option>
+        <option value="kn">卡纳达语</option>
+        <option value="kr">卡努里语</option>
+        <option value="kw">康沃尔语</option>
+        <option value="ky">柯尔克孜语</option>
+        <option value="kv">科米语</option>
+        <option value="xh">科萨语</option>
+        <option value="co">科西嘉语</option>
+        <option value="cr">克里语</option>
+        <option value="hr">克罗地亚语</option>
+        <option value="qu">克丘亚语</option>
+        <option value="ks">克什米尔语</option>
+        <option value="ku">库尔德语</option>
+        <option value="kj">宽亚玛语</option>
+        <option value="la">拉丁语</option>
+        <option value="lv">拉脱维亚语</option>
+        <option value="lo">老挝语</option>
+        <option value="lt">立陶宛语</option>
+        <option value="ii">凉山彝语</option>
+        <option value="li">林堡语</option>
+        <option value="ln">林加拉语</option>
+        <option value="rn">隆迪语</option>
+        <option value="lg">卢干达语</option>
+        <option value="lb">卢森堡语</option>
+        <option value="rw">卢旺达语</option>
+        <option value="lu">鲁巴加丹加语</option>
+        <option value="ro">罗马尼亚语</option>
+        <option value="rm">罗曼什语</option>
+        <option value="gv">马恩语</option>
+        <option value="mt">马耳他语</option>
+        <option value="mr">马拉地语</option>
+        <option value="mg">马拉加斯语</option>
+        <option value="ml">马拉雅拉姆语</option>
+        <option value="mk">马其顿语</option>
+        <option value="mh">马绍尔语</option>
+        <option value="mi">毛利语</option>
+        <option value="mn">蒙古语</option>
+        <option value="bn">孟加拉语</option>
+        <option value="my">缅甸语</option>
+        <option value="nv">纳瓦霍语</option>
+        <option value="nr">南恩德贝勒语</option>
+        <option value="af">南非荷兰语</option>
+        <option value="st">南索托语</option>
+        <option value="na">瑙鲁语</option>
+        <option value="ne">尼泊尔语</option>
+        <option value="nn">挪威尼诺斯克语</option>
+        <option value="no">挪威语</option>
+        <option value="pa">旁遮普语</option>
+        <option value="ps">普什图语</option>
+        <option value="ny">齐切瓦语</option>
+        <option value="sv">瑞典语</option>
+        <option value="sc">萨丁语</option>
+        <option value="sm">萨摩亚语</option>
+        <option value="sr">塞尔维亚语</option>
+        <option value="sg">桑戈语</option>
+        <option value="si">僧伽罗语</option>
+        <option value="sn">绍纳语</option>
+        <option value="eo">世界语</option>
+        <option value="nb">书面挪威语</option>
+        <option value="sk">斯洛伐克语</option>
+        <option value="sl">斯洛文尼亚语</option>
+        <option value="ss">斯瓦蒂语</option>
+        <option value="sw">斯瓦希里语</option>
+        <option value="gd">苏格兰盖尔语</option>
+        <option value="so">索马里语</option>
+        <option value="tg">塔吉克语</option>
+        <option value="ty">塔希提语</option>
+        <option value="te">泰卢固语</option>
+        <option value="ta">泰米尔语</option>
+        <option value="to">汤加语</option>
+        <option value="ti">提格利尼亚语</option>
+        <option value="tr">土耳其语</option>
+        <option value="tk">土库曼语</option>
+        <option value="wa">瓦隆语</option>
+        <option value="cy">威尔士语</option>
+        <option value="ug">维吾尔语</option>
+        <option value="ve">文达语</option>
+        <option value="vo">沃拉普克语</option>
+        <option value="wo">沃洛夫语</option>
+        <option value="ur">乌尔都语</option>
+        <option value="uk">乌克兰语</option>
+        <option value="uz">乌兹别克语</option>
+        <option value="fy">西弗里西亚语</option>
+        <option value="he">希伯来语</option>
+        <option value="el">希腊语</option>
+        <option value="ho">希里莫图语</option>
+        <option value="sd">信德语</option>
+        <option value="hu">匈牙利语</option>
+        <option value="su">巽他语</option>
+        <option value="hy">亚美尼亚语</option>
+        <option value="ig">伊博语</option>
+        <option value="io">伊多语</option>
+        <option value="ik">伊努皮克语</option>
+        <option value="it">意大利语</option>
+        <option value="yi">意第绪语</option>
+        <option value="iu">因纽特语</option>
+        <option value="yo">约鲁巴语</option>
+        <option value="jv">爪哇语</option>
+        <option value="za">壮语</option>
+        <option value="dz">宗卡语</option>
+        <option value="zu">祖鲁语</option>
+        <option value="custom">其他语言（自定义）</option>
+      </select></label>
+      <label><span>阅读目标语言（右键翻译）</span><select id="aiReadingTarget">
+        <option value="en">英语</option>
+        <option value="tl">菲律宾语 / 他加禄语</option>
+        <option value="ja">日语</option>
+        <option value="ko">韩语</option>
+        <option value="zh-Hans">简体中文</option>
+        <option value="zh-Hant">繁体中文</option>
+        <option value="es">西班牙语</option>
+        <option value="fr">法语</option>
+        <option value="de">德语</option>
+        <option value="ru">俄语</option>
+        <option value="ar">阿拉伯语</option>
+        <option value="pt">葡萄牙语</option>
+        <option value="hi">印地语</option>
+        <option value="id">印度尼西亚语</option>
+        <option value="vi">越南语</option>
+        <option value="th">泰语</option>
+        <option value="ms">马来语</option>
+        <option value="ab">阿布哈西亚语</option>
+        <option value="sq">阿尔巴尼亚语</option>
+        <option value="aa">阿法尔语</option>
+        <option value="ak">阿肯语</option>
+        <option value="tw">阿肯语</option>
+        <option value="an">阿拉贡语</option>
+        <option value="am">阿姆哈拉语</option>
+        <option value="as">阿萨姆语</option>
+        <option value="az">阿塞拜疆语</option>
+        <option value="av">阿瓦尔语</option>
+        <option value="ae">阿维斯塔语</option>
+        <option value="ee">埃维语</option>
+        <option value="ay">艾马拉语</option>
+        <option value="ga">爱尔兰语</option>
+        <option value="et">爱沙尼亚语</option>
+        <option value="oj">奥吉布瓦语</option>
+        <option value="oc">奥克语</option>
+        <option value="or">奥里亚语</option>
+        <option value="om">奥罗莫语</option>
+        <option value="os">奥塞梯语</option>
+        <option value="pi">巴利语</option>
+        <option value="ba">巴什基尔语</option>
+        <option value="eu">巴斯克语</option>
+        <option value="be">白俄罗斯语</option>
+        <option value="bm">班巴拉语</option>
+        <option value="bg">保加利亚语</option>
+        <option value="nd">北恩德贝勒语</option>
+        <option value="se">北方萨米语</option>
+        <option value="bi">比斯拉马语</option>
+        <option value="is">冰岛语</option>
+        <option value="pl">波兰语</option>
+        <option value="bs">波斯尼亚语</option>
+        <option value="fa">波斯语</option>
+        <option value="bh">博杰普尔语</option>
+        <option value="br">布列塔尼语</option>
+        <option value="bo">藏语</option>
+        <option value="ch">查莫罗语</option>
+        <option value="ce">车臣语</option>
+        <option value="cv">楚瓦什语</option>
+        <option value="tn">茨瓦纳语</option>
+        <option value="ts">聪加语</option>
+        <option value="tt">鞑靼语</option>
+        <option value="da">丹麦语</option>
+        <option value="dv">迪维希语</option>
+        <option value="ng">恩东加语</option>
+        <option value="fo">法罗语</option>
+        <option value="sa">梵语</option>
+        <option value="fj">斐济语</option>
+        <option value="fi">芬兰语</option>
+        <option value="ff">富拉语</option>
+        <option value="kg">刚果语</option>
+        <option value="km">高棉语</option>
+        <option value="kl">格陵兰语</option>
+        <option value="ka">格鲁吉亚语</option>
+        <option value="gu">古吉拉特语</option>
+        <option value="gn">瓜拉尼语</option>
+        <option value="ie">国际文字（E）</option>
+        <option value="ia">国际语</option>
+        <option value="kk">哈萨克语</option>
+        <option value="ht">海地克里奥尔语</option>
+        <option value="ha">豪萨语</option>
+        <option value="nl">荷兰语</option>
+        <option value="hz">赫雷罗语</option>
+        <option value="ki">吉库尤语</option>
+        <option value="gl">加利西亚语</option>
+        <option value="ca">加泰罗尼亚语</option>
+        <option value="cu">教会斯拉夫语</option>
+        <option value="cs">捷克语</option>
+        <option value="kn">卡纳达语</option>
+        <option value="kr">卡努里语</option>
+        <option value="kw">康沃尔语</option>
+        <option value="ky">柯尔克孜语</option>
+        <option value="kv">科米语</option>
+        <option value="xh">科萨语</option>
+        <option value="co">科西嘉语</option>
+        <option value="cr">克里语</option>
+        <option value="hr">克罗地亚语</option>
+        <option value="qu">克丘亚语</option>
+        <option value="ks">克什米尔语</option>
+        <option value="ku">库尔德语</option>
+        <option value="kj">宽亚玛语</option>
+        <option value="la">拉丁语</option>
+        <option value="lv">拉脱维亚语</option>
+        <option value="lo">老挝语</option>
+        <option value="lt">立陶宛语</option>
+        <option value="ii">凉山彝语</option>
+        <option value="li">林堡语</option>
+        <option value="ln">林加拉语</option>
+        <option value="rn">隆迪语</option>
+        <option value="lg">卢干达语</option>
+        <option value="lb">卢森堡语</option>
+        <option value="rw">卢旺达语</option>
+        <option value="lu">鲁巴加丹加语</option>
+        <option value="ro">罗马尼亚语</option>
+        <option value="rm">罗曼什语</option>
+        <option value="gv">马恩语</option>
+        <option value="mt">马耳他语</option>
+        <option value="mr">马拉地语</option>
+        <option value="mg">马拉加斯语</option>
+        <option value="ml">马拉雅拉姆语</option>
+        <option value="mk">马其顿语</option>
+        <option value="mh">马绍尔语</option>
+        <option value="mi">毛利语</option>
+        <option value="mn">蒙古语</option>
+        <option value="bn">孟加拉语</option>
+        <option value="my">缅甸语</option>
+        <option value="nv">纳瓦霍语</option>
+        <option value="nr">南恩德贝勒语</option>
+        <option value="af">南非荷兰语</option>
+        <option value="st">南索托语</option>
+        <option value="na">瑙鲁语</option>
+        <option value="ne">尼泊尔语</option>
+        <option value="nn">挪威尼诺斯克语</option>
+        <option value="no">挪威语</option>
+        <option value="pa">旁遮普语</option>
+        <option value="ps">普什图语</option>
+        <option value="ny">齐切瓦语</option>
+        <option value="sv">瑞典语</option>
+        <option value="sc">萨丁语</option>
+        <option value="sm">萨摩亚语</option>
+        <option value="sr">塞尔维亚语</option>
+        <option value="sg">桑戈语</option>
+        <option value="si">僧伽罗语</option>
+        <option value="sn">绍纳语</option>
+        <option value="eo">世界语</option>
+        <option value="nb">书面挪威语</option>
+        <option value="sk">斯洛伐克语</option>
+        <option value="sl">斯洛文尼亚语</option>
+        <option value="ss">斯瓦蒂语</option>
+        <option value="sw">斯瓦希里语</option>
+        <option value="gd">苏格兰盖尔语</option>
+        <option value="so">索马里语</option>
+        <option value="tg">塔吉克语</option>
+        <option value="ty">塔希提语</option>
+        <option value="te">泰卢固语</option>
+        <option value="ta">泰米尔语</option>
+        <option value="to">汤加语</option>
+        <option value="ti">提格利尼亚语</option>
+        <option value="tr">土耳其语</option>
+        <option value="tk">土库曼语</option>
+        <option value="wa">瓦隆语</option>
+        <option value="cy">威尔士语</option>
+        <option value="ug">维吾尔语</option>
+        <option value="ve">文达语</option>
+        <option value="vo">沃拉普克语</option>
+        <option value="wo">沃洛夫语</option>
+        <option value="ur">乌尔都语</option>
+        <option value="uk">乌克兰语</option>
+        <option value="uz">乌兹别克语</option>
+        <option value="fy">西弗里西亚语</option>
+        <option value="he">希伯来语</option>
+        <option value="el">希腊语</option>
+        <option value="ho">希里莫图语</option>
+        <option value="sd">信德语</option>
+        <option value="hu">匈牙利语</option>
+        <option value="su">巽他语</option>
+        <option value="hy">亚美尼亚语</option>
+        <option value="ig">伊博语</option>
+        <option value="io">伊多语</option>
+        <option value="ik">伊努皮克语</option>
+        <option value="it">意大利语</option>
+        <option value="yi">意第绪语</option>
+        <option value="iu">因纽特语</option>
+        <option value="yo">约鲁巴语</option>
+        <option value="jv">爪哇语</option>
+        <option value="za">壮语</option>
+        <option value="dz">宗卡语</option>
+        <option value="zu">祖鲁语</option>
+        <option value="custom">其他语言（自定义）</option>
+      </select></label>
+      <label id="aiReadingCustomLanguageField" hidden><span>自定义阅读语言</span><input id="aiReadingCustomLanguage" type="text" maxlength="80" placeholder="语言名称或代码"></label>
+      <p class="hint">仅简译 / 繁译启用：桌面选中文字后右键点击翻译；网页使用水杉阅读翻译扩展的右键菜单。仅点击翻译才读取与请求，自动识别原文语言；结果显示在浮窗，不修改原应用。普通简 / 繁不监听选区。发送翻译仍只由 Ctrl+Enter 触发。</p>
+      <label><span>切换 AI 翻译快捷键</span><input id="aiTranslationHotkey" type="text" placeholder="未设置（例如 Ctrl+Alt+T）" autocomplete="off"></label>
+      <label id="aiTranslationCustomLanguageField" hidden><span>自定义目标语言</span><input id="aiTranslationCustomLanguage" type="text" placeholder="例如：粤语、宿务语、克林贡语，或语言代码" autocomplete="off"></label>
+    </div>
+    <p class="ai-description">可选择 185 种语言选项，也可填写其他语言名称。翻译质量和支持程度取决于当前 AI 模型。</p>
+    <p class="ai-description">点击悬浮栏的「简 / 繁 / 简译 / 繁译」循环切换。原简繁快捷键仍只切简繁。简译 / 繁译模式下，Space / 数字将选中的中文加入待翻译句子；Enter 一次上屏原文，Ctrl+Enter 才查询缓存并翻译上屏。分段输入与等待均不调用翻译 API。Backspace 纠错，Esc 先取消当前拼音、再清空待翻译句子。</p>
+    <button id="aiTranslationClearCache" type="button" class="credential-test-button">清空 AI 翻译缓存</button>
+  </div>
+  <div class="section ai-section">
+    <div class="section-header">
+      <div><div class="section-title">翻译库 Google 同步</div><div class="ai-description">本地缓存实时保存；每天后台双向合并指定表格，人工修改优先。Google 同步失败不影响输入。</div></div>
+      <div class="ftb-toggle-btn" id="aiTranslationSyncEnabled" role="switch" aria-checked="true" tabindex="0"><div class="ftb-toggle-knob"></div></div>
+    </div>
+    <p class="ai-description">云端库由本机 google-sync.json 的 spreadsheet_id 指定（gid=0）。使用你自己的表格、Google 项目与桌面 OAuth 客户端，再导入并授权。</p>
+    <div class="credential-test-row">
+      <button id="aiTranslationSyncImport" type="button" class="credential-test-button">导入 Google 客户端 JSON</button>
+      <button id="aiTranslationSyncAuthorize" type="button" class="credential-test-button">授权 Google 账号</button>
+      <button id="aiTranslationSyncNow" type="button" class="credential-test-button">立即同步</button>
+    </div>
+    <p class="ai-description">上次同步时间：<span id="aiTranslationSyncLastTime">尚未同步</span></p>
+    <p class="ai-description" id="aiTranslationSyncStatus" role="status">请先导入客户端并授权。</p>
+  </div>
+  <div class="section ai-section">
+    <div class="section-header">
+      <div><div class="section-title">启用 AI 联想</div><div class="ai-description">在全拼和双拼输入时异步生成第 3 个候选项</div></div>
+      <div class="ftb-toggle-btn" id="aiEnabled" role="switch" aria-checked="false" tabindex="0"><div class="ftb-toggle-knob"></div></div>
+    </div>
+  </div>
+  <div class="section ai-section">
+    <div class="section-title ai-heading">API 配置</div>
+    <div class="ai-description ai-api-description">DeepSeek、OpenAI、SiliconFlow、Groq 均使用 OpenAI 兼容的 Chat Completions 接口。每个提供商的 Token 分开保存。</div>
+    <div class="ai-grid">
+      <div class="ai-field">
+        <span>服务提供商</span>
+        <div class="dropdown">
+          <button class="dropdown-toggle" id="aiProviderBtn" type="button">
+            <span>DeepSeek</span>
+            <img src="./assets/arrow.svg" alt="">
+          </button>
+          <div class="dropdown-menu" id="aiProviderMenu">
+            <div class="dropdown-item" data-value="deepseek">DeepSeek</div>
+            <div class="dropdown-item" data-value="openai">OpenAI</div>
+            <div class="dropdown-item" data-value="siliconflow">SiliconFlow</div>
+            <div class="dropdown-item" data-value="groq">Groq</div>
+          </div>
+        </div>
+      </div>
+      <label><span>模型</span><input id="aiModel" type="text" autocomplete="off" spellcheck="false"></label>
+      <div class="ai-field">
+        <label for="aiToken">API Token</label>
+        <span class="ai-secret-input">
+          <input id="aiToken" type="password" autocomplete="off" spellcheck="false">
+          <button id="aiTokenVisibility" class="ai-secret-toggle" type="button" aria-label="显示 API Token" aria-pressed="false" title="显示 API Token">
+            <svg class="ai-secret-icon ai-secret-icon-show" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path>
+              <circle cx="12" cy="12" r="2.75"></circle>
+            </svg>
+            <svg class="ai-secret-icon ai-secret-icon-hide" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 3l18 18"></path>
+              <path d="M10.6 6.1A9.2 9.2 0 0 1 12 6c6 0 9.5 6 9.5 6a16.7 16.7 0 0 1-2.6 3.2M6.2 6.2C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6a9 9 0 0 0 3-.5"></path>
+              <path d="M9.8 9.8a3 3 0 0 0 4.4 4.4"></path>
+            </svg>
+          </button>
+        </span>
+      </div>
+      <label><span>候选数量</span><input id="aiCandidateLimit" type="number" min="1" max="10" autocomplete="off"></label>
+      <label class="ai-wide"><span>接口地址</span><input id="aiEndpoint" type="url" autocomplete="off" spellcheck="false"></label>
+    </div>
+    <div class="credential-test-row">
+      <button id="aiCredentialTestButton" class="credential-test-button" type="button">测试配置</button>
+      <span id="aiCredentialTestStatus" class="credential-test-status" role="status" aria-live="polite"></span>
+    </div>
+  </div>
+  <div class="section ai-section">
+    <div class="ai-prompt-header">
+      <div class="ai-field">
+        <span>自定义提示词</span>
+        <div class="dropdown">
+          <button class="dropdown-toggle" id="aiPromptSlotBtn" type="button">
+            <span>自定义一</span>
+            <img src="./assets/arrow.svg" alt="">
+          </button>
+          <div class="dropdown-menu" id="aiPromptSlotMenu">
+            <div class="dropdown-item" data-value="custom_1">自定义一</div>
+            <div class="dropdown-item" data-value="custom_2">自定义二</div>
+            <div class="dropdown-item" data-value="custom_3">自定义三</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <textarea id="aiPrompt" class="ai-prompt" autocomplete="off" spellcheck="false"></textarea>
+  </div>
+</div>

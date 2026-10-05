@@ -1,0 +1,194 @@
+<div class="content" id="floating-toolbar-settings">
+  <div class="content-header"><span>悬浮工具栏</span></div>
+
+  <div class="section floating-toolbar-card">
+    <div class="section-header floating-toolbar-setting-row">
+      <div>
+        <div class="section-title">在桌面显示悬浮工具栏</div>
+        <div class="floating-toolbar-description">快速访问输入法状态与常用功能</div>
+      </div>
+      <div class="ftb-toggle-btn active" id="ftbToggleBtn" role="switch" aria-label="在桌面显示悬浮工具栏" aria-checked="true" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header floating-toolbar-setting-row ftb-auto-hide-row">
+      <div>
+        <div class="section-title caret-state-option-title">自动隐藏工具栏</div>
+        <div class="floating-toolbar-description">工具栏显示一段时间无交互后淡出隐藏；鼠标悬停不隐藏，切换中英等状态变化时重新显示</div>
+      </div>
+      <div class="ftb-toggle-btn" id="ftbAutoHideToggleBtn" role="switch" aria-label="自动隐藏工具栏" aria-checked="false" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header floating-toolbar-setting-row ftb-auto-hide-delay-row is-disabled" id="ftbAutoHideDelayRow">
+      <div>
+        <div class="section-title caret-state-option-title">自动隐藏延时</div>
+        <div class="floating-toolbar-description">工具栏显示多久后开始淡出（秒）</div>
+      </div>
+      <div class="number-stepper">
+        <button type="button" class="number-stepper-btn" id="ftbAutoHideDelayDecBtn" aria-label="减少 1 秒" tabindex="-1">−</button>
+        <input type="text" class="number-stepper-input" id="ftbAutoHideDelayInput" inputmode="numeric" value="5" aria-label="自动隐藏延时（秒）" tabindex="-1">
+        <button type="button" class="number-stepper-btn" id="ftbAutoHideDelayIncBtn" aria-label="增加 1 秒" tabindex="-1">+</button>
+      </div>
+    </div>
+
+    <div class="floating-toolbar-preview" role="img" aria-label="悬浮工具栏预览">
+      <div class="floating-toolbar-preview-label">预览</div>
+      <div class="ftb-preview-host" id="ftbPreviewHost"></div>
+    </div>
+  </div>
+
+  <div class="section caret-state-indicator-card">
+    <div class="section-header floating-toolbar-setting-row caret-state-heading">
+      <div>
+        <div class="section-title">光标状态提示</div>
+        <div class="floating-toolbar-description">在文字光标附近短暂显示输入法状态，可与悬浮工具栏同时开启</div>
+      </div>
+    </div>
+
+    <div class="section-header floating-toolbar-setting-row">
+      <div>
+        <div class="section-title caret-state-option-title">切换输入法状态时提示</div>
+        <div class="floating-toolbar-description">切换输入模式、全半角或中英文标点时显示</div>
+      </div>
+      <div class="ftb-toggle-btn" id="caretStateIndicatorToggleBtn" role="switch" aria-label="切换输入法状态时提示" aria-checked="false" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header floating-toolbar-setting-row">
+      <div>
+        <div class="section-title caret-state-option-title">切换输入框时提示</div>
+        <div class="floating-toolbar-description">焦点移到另一个输入框时（包括同一窗口内和其他窗口中的），也提示当前中英文状态</div>
+      </div>
+      <div class="ftb-toggle-btn" id="caretStateIndicatorOnFocusToggleBtn" role="switch" aria-label="切换输入框时提示当前中英文状态" aria-checked="false" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+
+    <div class="section-header floating-toolbar-setting-row">
+      <div>
+        <div class="section-title caret-state-option-title">提示位置</div>
+        <div class="floating-toolbar-description">选择光标状态提示显示在光标的哪个方向</div>
+      </div>
+      <div class="dropdown">
+        <button class="dropdown-toggle" id="caretStateIndicatorPositionBtn">
+          <span>左上方</span>
+          <div class="arrow"><img src="./assets/arrow.svg" alt="arrow"></div>
+        </button>
+        <div class="dropdown-menu compact-scroll-menu" id="caretStateIndicatorPositionMenu">
+          <div class="dropdown-item" data-value="top-left">左上方</div>
+          <div class="dropdown-item" data-value="top">正上方</div>
+          <div class="dropdown-item" data-value="top-right">右上方</div>
+          <div class="dropdown-item" data-value="bottom-left">左下方</div>
+          <div class="dropdown-item" data-value="bottom">正下方</div>
+          <div class="dropdown-item" data-value="bottom-right">右下方</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="caret-state-preview" role="img" aria-label="光标状态提示预览：每个文字光标左上方分别显示中、中文标点和中文模式、全角、简体">
+      <div class="floating-toolbar-preview-label">预览</div>
+      <div class="cand-preview" aria-hidden="true">
+        <div class="candidate caret-state-preview-host" id="caretStatePreviewHost" data-position="top-left">
+          <div class="caret-state-preview-item">
+            <div class="caret-state-badge">中</div>
+            <span class="caret-state-preview-caret"></span>
+          </div>
+          <div class="caret-state-preview-item">
+            <div class="caret-state-badge caret-state-badge-punctuation" aria-label="，。  中">
+              <span class="caret-state-punctuation-slot">，。</span>
+              <span class="caret-state-mode-slot">中</span>
+            </div>
+            <span class="caret-state-preview-caret"></span>
+          </div>
+          <div class="caret-state-preview-item">
+            <div class="caret-state-badge">全</div>
+            <span class="caret-state-preview-caret"></span>
+          </div>
+          <div class="caret-state-preview-item">
+            <div class="caret-state-badge">简</div>
+            <span class="caret-state-preview-caret"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section floating-toolbar-appearance">
+    <div class="section-header">
+      <div>
+        <div class="section-title">工具栏缩放</div>
+        <div class="floating-toolbar-description">相对系统 DPI 的额外缩放，不改变系统显示缩放</div>
+      </div>
+      <div class="dropdown">
+        <button class="dropdown-toggle" id="ftbScaleBtn">
+          <span>100%</span>
+          <div class="arrow">
+            <img src="./assets/arrow.svg" alt="arrow">
+          </div>
+        </button>
+        <div class="dropdown-menu compact-scroll-menu" id="ftbScaleMenu">
+          <div class="dropdown-item" data-value="0.75">75%</div>
+          <div class="dropdown-item" data-value="1">100%</div>
+          <div class="dropdown-item" data-value="1.25">125%</div>
+          <div class="dropdown-item" data-value="1.5">150%</div>
+        </div>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div class="section-header">
+      <div>
+        <div class="section-title">图标尺寸</div>
+        <div class="floating-toolbar-description">图标基准大小（像素），再乘以上方缩放</div>
+      </div>
+      <div class="dropdown">
+        <button class="dropdown-toggle" id="ftbFontSizeBtn">
+          <span>24</span>
+          <div class="arrow">
+            <img src="./assets/arrow.svg" alt="arrow">
+          </div>
+        </button>
+        <div class="dropdown-menu compact-scroll-menu" id="ftbFontSizeMenu">
+          <div class="dropdown-item" data-value="16">16</div>
+          <div class="dropdown-item" data-value="18">18</div>
+          <div class="dropdown-item" data-value="20">20</div>
+          <div class="dropdown-item" data-value="22">22</div>
+          <div class="dropdown-item" data-value="24">24</div>
+          <div class="dropdown-item" data-value="26">26</div>
+          <div class="dropdown-item" data-value="28">28</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section floating-toolbar-components">
+    <div class="section-header">
+      <div>
+        <div class="section-title">工具栏组件</div>
+        <div class="floating-toolbar-description">勾选要显示在悬浮工具栏中的功能</div>
+      </div>
+    </div>
+    <div class="floating-toolbar-component-list">
+      <label class="check-option floating-toolbar-required-option">
+        <input type="checkbox" checked disabled>
+        <span>中英文切换</span>
+        <span class="floating-toolbar-required-label">始终显示</span>
+      </label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbFullwidthCheckbox" data-toolbar-item="fullwidth" checked><span>全角 / 半角</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbPunctuationCheckbox" data-toolbar-item="punctuation" checked><span>中英文标点</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbCharacterSetCheckbox" data-toolbar-item="character_set" checked><span>简繁切换</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbEmojiCheckbox" data-toolbar-item="emoji" checked><span>表情与符号</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbScreenKeyboardCheckbox" data-toolbar-item="screen_keyboard"><span>屏幕键盘</span></label>
+      <div class="input-option-divider"></div>
+      <label class="check-option"><input type="checkbox" id="ftbSettingsCheckbox" data-toolbar-item="settings" checked><span>设置</span></label>
+    </div>
+  </div>
+</div>

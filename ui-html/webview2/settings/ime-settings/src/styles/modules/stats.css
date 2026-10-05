@@ -1,0 +1,462 @@
+/* 统计模块样式。配色全部走设置页 CSS 变量，热力图五级色阶用 color-mix 在
+   accent 上叠透明度（先写 rgba 兜底，不支持 color-mix 的引擎退到固定紫色）。 */
+
+#stats-settings [hidden] {
+  display: none !important;
+}
+
+.stats-note {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+/* 粘在内容区顶部：无论用户滚到统计页哪个位置，错误提示都可见。 */
+.stats-status {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin-bottom: 18px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  box-shadow: var(--card-shadow);
+  font-size: var(--font-size-caption);
+}
+
+.stats-status.is-error {
+  border-color: rgba(255, 119, 119, 0.35);
+  background: rgba(255, 119, 119, 0.12);
+  color: var(--danger-text);
+}
+
+/* ------------------------------------------------------------------- empty */
+
+.stats-empty {
+  text-align: center;
+  padding: 36px 24px;
+}
+
+.stats-empty-title {
+  font-size: var(--font-size-section-title);
+  font-weight: var(--font-weight-title);
+  color: var(--text-color);
+  margin-bottom: 8px;
+}
+
+.stats-empty-text {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.6;
+  max-width: 520px;
+  margin: 0 auto 16px;
+}
+
+.stats-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--control-border);
+  background: var(--button-secondary-bg);
+  color: var(--button-secondary-text);
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.stats-btn:hover {
+  background: var(--button-secondary-hover);
+}
+
+.stats-btn.primary {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #fff;
+}
+
+.stats-btn.primary:hover {
+  background: var(--accent-strong);
+}
+
+.stats-btn.danger {
+  color: var(--danger-text);
+  border-color: rgba(255, 119, 119, 0.35);
+}
+
+.stats-btn.danger:hover {
+  color: var(--danger-hover);
+  border-color: rgba(255, 119, 119, 0.55);
+}
+
+/* ------------------------------------------------------------------- cards */
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.stats-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--card-shadow);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stats-card-title {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.stats-card-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stats-card-value strong {
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stats-card-unit {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.stats-card-note {
+  color: var(--text-subtle);
+  font-size: 12px;
+  min-height: 18px;
+}
+
+/* ------------------------------------------------------------------- speed */
+
+.stats-speed-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.stats-speed-item {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stats-speed-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+}
+
+.stats-speed-value {
+  font-size: 19px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-speed-note {
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+.stats-best-day {
+  margin-top: 12px;
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+/* ---------------------------------------------------------------- calendar */
+
+.stats-calendar-scroll {
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-top: 12px;
+}
+
+.stats-calendar-months {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--stats-cal-cell, 13px);
+  gap: 2px;
+  width: max-content;
+}
+
+.stats-month-label {
+  font-size: 10px;
+  color: var(--text-subtle);
+  white-space: nowrap;
+  overflow: visible;
+  min-width: var(--stats-cal-cell, 13px);
+  line-height: 15px;
+}
+
+.stats-calendar-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: var(--stats-cal-cell, 13px);
+  grid-template-rows: repeat(7, var(--stats-cal-cell, 13px));
+  gap: 2px;
+  width: max-content;
+}
+
+.stats-cell {
+  display: block;
+  width: var(--stats-cal-cell, 13px);
+  height: var(--stats-cal-cell, 13px);
+  border-radius: 3px;
+  background: var(--surface-sunken);
+}
+
+.stats-cell.lv0 {
+  background: var(--surface-sunken);
+}
+
+.stats-cell.lv1 {
+  background: rgba(142, 140, 216, 0.28);
+  background: color-mix(in srgb, var(--accent-color) 28%, transparent);
+}
+
+.stats-cell.lv2 {
+  background: rgba(142, 140, 216, 0.48);
+  background: color-mix(in srgb, var(--accent-color) 48%, transparent);
+}
+
+.stats-cell.lv3 {
+  background: rgba(142, 140, 216, 0.7);
+  background: color-mix(in srgb, var(--accent-color) 70%, transparent);
+}
+
+.stats-cell.lv4 {
+  background: rgba(142, 140, 216, 0.95);
+  background: color-mix(in srgb, var(--accent-color) 95%, transparent);
+}
+
+.stats-cell.out {
+  background: transparent;
+  outline: 1px dashed var(--border-color);
+}
+
+.stats-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------ split panels */
+
+.stats-split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 18px;
+}
+
+.stats-split > .section {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ hourly */
+
+.stats-hourly {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 130px;
+  margin-top: 12px;
+}
+
+.stats-hour-col {
+  flex: 1;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stats-hour-track {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+}
+
+.stats-hour-bar {
+  width: 100%;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--accent-color);
+  opacity: 0.85;
+}
+
+.stats-hour-bar.is-empty {
+  background: var(--surface-sunken);
+  opacity: 1;
+}
+
+.stats-hour-label {
+  height: 15px;
+  font-size: 10px;
+  color: var(--text-subtle);
+  line-height: 15px;
+}
+
+/* -------------------------------------------------------------- categories */
+
+.stats-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.stats-cat-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.stats-cat-name {
+  color: var(--text-secondary);
+  font-size: var(--font-size-caption);
+}
+
+.stats-cat-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.stats-cat-bar {
+  height: 100%;
+  border-radius: 999px;
+  min-width: 2px;
+}
+
+.stats-cat-bar.k0 {
+  background: var(--accent-color);
+}
+
+.stats-cat-bar.k1 {
+  background: #4a90d9;
+}
+
+.stats-cat-bar.k2 {
+  background: #d99b3c;
+}
+
+.stats-cat-bar.k3 {
+  background: #9a7ad1;
+}
+
+.stats-cat-bar.k4 {
+  background: #98a2b8;
+}
+
+.stats-cat-stat {
+  text-align: right;
+  color: var(--text-subtle);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- details */
+
+.stats-details {
+  overflow-x: auto;
+  margin-top: 12px;
+}
+
+.stats-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+}
+
+.stats-detail-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-subtle);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--table-border);
+  white-space: nowrap;
+}
+
+.stats-detail-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--table-border);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stats-detail-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.stats-detail-table .mono {
+  font-family: Consolas, "Cascadia Mono", monospace;
+}
+
+.stats-detail-table .strong {
+  color: var(--text-color);
+  font-weight: 600;
+}
+
+.stats-detail-table .dim {
+  color: var(--text-subtle);
+}
+
+/* ------------------------------------------------------------ clear/status */
+
+.stats-clear-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.stats-clear-status {
+  margin-top: 10px;
+  min-height: 18px;
+  font-size: var(--font-size-caption);
+  color: var(--text-muted);
+}
+
+.stats-clear-status.is-error {
+  color: var(--danger-text);
+}
+
+@media (max-width: 820px) {
+  .stats-cards,
+  .stats-speed-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stats-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

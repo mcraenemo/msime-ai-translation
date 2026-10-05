@@ -1,0 +1,130 @@
+<div class="content" id="stats-settings">
+  <div class="content-header"><span>统计</span></div>
+
+  <!-- 开关 -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title">启用输入统计</div>
+        <div class="stats-description">只在本机记录输入字数与活跃时长，不记录输入内容，不联网；默认关闭</div>
+      </div>
+      <div class="ftb-toggle-btn" id="statisticsEnabledToggleBtn" role="switch" aria-checked="false" tabindex="0">
+        <div class="ftb-toggle-knob"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-status" id="statsStatus" hidden></div>
+
+  <!-- 空状态：未启用 -->
+  <div class="section stats-empty" id="statsDisabledEmpty">
+    <div class="stats-empty-title">统计未启用</div>
+    <div class="stats-empty-text" id="statsDisabledText">开启后这里会显示输入字数、速度与时段分布。统计只保存在本机，不记录输入内容，也不联网。</div>
+    <button class="stats-btn primary" id="statsEnableButton" type="button">启用输入统计</button>
+  </div>
+
+  <!-- 空状态：已启用但还没有数据 -->
+  <div class="section stats-empty" id="statsNoDataEmpty" hidden>
+    <div class="stats-empty-title">还没有统计数据</div>
+    <div class="stats-empty-text">开启后正常打字即可积累统计，中文和英文模式都会记录。</div>
+  </div>
+
+  <div id="statsContent" hidden>
+    <!-- 概览卡片 -->
+    <div class="stats-cards" id="statsCards"></div>
+
+    <!-- 输入速度与最高日 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">输入速度</div>
+        <div class="stats-note">可读字数（中文+英文）÷ 活跃分钟；数字、标点不计入，相邻上屏间隔不超过 10 秒计为活跃</div>
+      </div>
+      <div class="stats-speed-grid" id="statsSpeedGrid"></div>
+      <div class="stats-best-day" id="statsBestDay"></div>
+    </div>
+
+    <!-- 日历热力图 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">日历热力图</div>
+        <div class="stats-note">近 12 个月，颜色越深输入越多</div>
+      </div>
+      <div class="stats-calendar-scroll" id="statsCalendar">
+        <div class="stats-calendar-months" id="statsCalendarMonths"></div>
+        <div class="stats-calendar-grid" id="statsCalendarGrid"></div>
+      </div>
+      <div class="stats-legend">
+        <span>少</span>
+        <i class="stats-cell lv0"></i>
+        <i class="stats-cell lv1"></i>
+        <i class="stats-cell lv2"></i>
+        <i class="stats-cell lv3"></i>
+        <i class="stats-cell lv4"></i>
+        <span>多</span>
+      </div>
+    </div>
+
+    <!-- 今日时段 + 字符分类 -->
+    <div class="stats-split">
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">今日时段分布</div>
+        </div>
+        <div class="stats-hourly" id="statsHourly"></div>
+      </div>
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">字符分类</div>
+        </div>
+        <div class="stats-categories" id="statsCategories"></div>
+      </div>
+    </div>
+
+    <!-- 按日明细 -->
+    <div class="section">
+      <div class="section-header">
+        <div class="section-title">按日明细</div>
+        <div class="stats-note">最近 30 天</div>
+      </div>
+      <div class="stats-details" id="statsDetails"></div>
+    </div>
+  </div>
+
+  <!-- 数据清理 -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title">数据清理</div>
+        <div class="stats-description">自动清理按保留策略删除超期记录，在 Server 跨天后首次写入统计时执行；「清空统计数据」会删除全部记录（包括今天），删除后无法恢复</div>
+      </div>
+    </div>
+    <div class="stats-clear-row">
+      <label for="statsRetention">自动清理</label>
+      <select id="statsRetention">
+        <option value="forever" selected>永久保留</option>
+        <option value="30d">保留最近 30 天</option>
+        <option value="90d">保留最近 90 天</option>
+        <option value="180d">保留最近 180 天</option>
+        <option value="365d">保留最近 365 天</option>
+      </select>
+      <span class="stats-note">选中即保存</span>
+    </div>
+    <div class="stats-clear-row">
+      <button class="stats-btn danger" id="statsClearButton" type="button">清空统计数据</button>
+      <span class="stats-note">删除全部记录且无法恢复</span>
+    </div>
+    <div class="stats-clear-status" id="statsClearStatus"></div>
+  </div>
+
+  <!-- 数据位置与隐私 -->
+  <div class="section">
+    <div class="section-title">数据位置与隐私</div>
+    <div class="stats-description">
+      统计数据保存在本机数据目录的 stats.db（SQLite）中，只包含每天每类字符的数量与活跃时长，
+      没有任何文本内容；不联网、不上传。关闭开关后停止记录，历史数据继续保留。
+    </div>
+    <div class="stats-clear-row">
+      <button class="stats-btn" id="statsOpenDirectoryButton" type="button">打开数据目录</button>
+    </div>
+  </div>
+</div>

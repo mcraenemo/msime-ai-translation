@@ -1,0 +1,95 @@
+.content-header {
+  display: flex;
+  align-items: center;
+  padding: 0 24px 12px 0.5em;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.content-header span {
+  font-weight: var(--font-weight-title);
+  font-size: var(--font-size-page-title);
+}
+
+.section {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 20px 24px;
+  margin-bottom: 18px;
+  box-shadow: var(--card-shadow);
+}
+
+.section-title {
+  font-size: var(--font-size-section-title);
+  font-weight: var(--font-weight-title);
+  color: var(--text-color);
+}
+
+/* 分组内的子设置项（开关行、下拉行、折叠展开的规则行）比分组标题低一级：
+   正文字号、介于常规和粗体之间的字重。雅黑只有 Regular / Bold，400~500 都
+   渲染成 Regular，所以用 400 加一道细描边模拟 Medium（同光标状态提示的子项）。 */
+.section-item-row .section-title,
+.frequency-option-row .section-title,
+.translation-language-row .section-title,
+.word-to-character-keys-row .section-title,
+.toggle-section-details .section-title,
+.theme-surface-details .section-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-body);
+  -webkit-text-stroke: var(--sub-item-title-stroke) currentColor;
+}
+
+/* 各页面的说明文字共用一套样式；模块里只保留各自的间距差异。 */
+.input-setting-description,
+.helpcode-description,
+.floating-toolbar-description,
+.voice-description,
+.quick-phrase-description,
+.stats-description,
+.skin-theme-description,
+.shortcut-section-description,
+.handwriting-description,
+.screenkb-description,
+.ai-description {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
+}
+
+/* 同一张卡片里上下排列的子设置项：统一行距，行与行之间用分隔线隔开。 */
+.section-item-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--divider-color);
+}
+
+.section-header:not(.section-item-row) + .section-item-row {
+  margin-top: 12px;
+}
+
+.section-item-row:last-child {
+  padding-bottom: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* 标题是 flex 子项时默认可收缩，旁边的说明文字一长就会把标题逐字挤成
+   两行（如「输入速度」变「输入速 / 度」）。标题保持自然宽度不收缩，
+   空间不足时由说明或控件一侧换行吸收。 */
+.section-header > .section-title {
+  flex-shrink: 0;
+}
+
+.divider {
+  width: 100%;
+  height: 0.5px;
+  background-color: var(--divider-color);
+  margin: 12px 0;
+  backdrop-filter: none;
+}
