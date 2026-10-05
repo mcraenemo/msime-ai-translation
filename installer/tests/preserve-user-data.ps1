@@ -17,11 +17,12 @@ $iss = [IO.File]::ReadAllText((Resolve-Path $issPath))
 $required = @(
     'msime_user.db', 'msime_user.db-wal', 'msime_user.db-shm', 'msime_user.db-journal',
     'stats.db', 'stats.db-wal', 'stats.db-shm', 'stats.db-journal',
-    'config.toml', 'config.base.toml'
+    'config.toml', 'config.base.toml',
+    'ai-translations.db', 'ai-translations.db-wal', 'ai-translations.db-shm', 'ai-translations.db-journal', 'google-sync.json'
 )
 
 # 目录类用户数据由 MigrateUserDataDir 单独 robocopy，迁移清单按文件解析取不到它们。
-$preservedDirectories = @('skins', 'helpcodes\custom', 'shuangpin', 'models')
+$preservedDirectories = @('skins', 'helpcodes\custom', 'shuangpin', 'models', 'browser-reading')
 
 function Get-PascalBody([string]$Text, [string]$Signature) {
     $start = [regex]::Match($Text, [regex]::Escape($Signature) + '\s*\(')

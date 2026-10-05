@@ -22,6 +22,10 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/DEBUG>")
 endif()
 
+if(MSVC)
+    add_link_options("/PDBALTPATH:%_PDB%")
+endif()
+
 include(CTest)
 
 # The engine is a first-party component of this repository, vendored in-tree at engine/ next to
@@ -45,6 +49,18 @@ endif()
 set (Boost_USE_STATIC_LIBS ON)
 find_package(Boost REQUIRED COMPONENTS locale json)
 include_directories(${Boost_INCLUDE_DIRS})
+
+# Optional source build avoids developer paths embedded in prebuilt Boost.JSON libraries.
+option(MSIME_BUILD_BOOST_JSON_FROM_HEADERS "Build Boost.JSON from its installed headers" OFF)
+set(MSIME_BOOST_JSON_TARGET Boost::json)
+if(MSIME_BUILD_BOOST_JSON_FROM_HEADERS)
+    add_library(msime_boost_json STATIC src/release/boost_json.cpp)
+    target_compile_definitions(msime_boost_json PRIVATE BOOST_ALL_NO_LIB BOOST_JSON_STATIC_LINK)
+    target_include_directories(msime_boost_json PRIVATE ${Boost_INCLUDE_DIRS})
+    target_link_libraries(msime_boost_json PUBLIC Boost::charconv Boost::container)
+    set(MSIME_BOOST_JSON_TARGET msime_boost_json)
+endif()
+
 
 # fmt, spdlog and sqlite3
 find_package(fmt CONFIG REQUIRED)
@@ -319,7 +335,7 @@ target_include_directories(${PROJECT_NAME}
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE MetasequoiaIme::Engine MetasequoiaIme::Voice MetasequoiaIme::VoiceCapture)
-target_link_libraries(${PROJECT_NAME} PRIVATE unofficial::sqlite3::sqlite3 fmt::fmt spdlog::spdlog Boost::locale Boost::json nlohmann_json::nlohmann_json)
+target_link_libraries(${PROJECT_NAME} PRIVATE unofficial::sqlite3::sqlite3 fmt::fmt spdlog::spdlog Boost::locale ${MSIME_BOOST_JSON_TARGET} nlohmann_json::nlohmann_json)
 target_link_libraries(${PROJECT_NAME} PRIVATE OpenCC::OpenCC)
 add_dependencies(${PROJECT_NAME} Dictionaries)
 target_link_libraries(${PROJECT_NAME} PRIVATE winhttp)
@@ -510,7 +526,7 @@ target_link_libraries(${SETTINGS_EXECUTABLE_NAME} PRIVATE
     MetasequoiaIme::Engine
     fmt::fmt
     Boost::locale
-    Boost::json
+    ${MSIME_BOOST_JSON_TARGET}
     nlohmann_json::nlohmann_json
     unofficial::sqlite3::sqlite3
     spdlog::spdlog

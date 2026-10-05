@@ -11,10 +11,11 @@ $extensionId = -join ($hash[0..15] | ForEach-Object { [char](97+($_ -shr 4)); [c
 $hostDirectory = Join-Path $env:LOCALAPPDATA 'metasequoiaime\browser-reading'
 New-Item -ItemType Directory -Path $hostDirectory -Force | Out-Null
 $manifestPath = Join-Path $hostDirectory 'org.metasequoiaime.reading.json'
-@{
+$manifest = @{
  name='org.metasequoiaime.reading';description='MSIME reading translation';path=$HostExecutable;type='stdio';
  allowed_origins=@("chrome-extension://$extensionId/")
-} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
+} | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText($manifestPath, $manifest, [Text.UTF8Encoding]::new($false))
 foreach($browser in @('Google\Chrome','Microsoft\Edge','BraveSoftware\Brave-Browser','Vivaldi')) {
  $key = "HKCU:\Software\$browser\NativeMessagingHosts\org.metasequoiaime.reading"
  New-Item -Path $key -Force | Out-Null

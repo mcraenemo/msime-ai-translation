@@ -16,7 +16,9 @@
 
 ## 使用与构建
 
-这是**源码分享版本**。本仓没有打包本机安装器或上传个人数据，使用者需要按文档自行编译 Windows 版本。
+从 [GitHub Releases](https://github.com/mcraenemo/msime-ai-translation/releases) 下载 **Windows x64 社区版安装包**；网页阅读翻译另下载浏览器扩展 ZIP。Windows 10/11 x64，包含 32/64 位输入法组件。
+
+本社区安装包未签名，后台按普通用户权限运行；管理员权限程序中的输入或划词可能受限。它不是上游官方发行版，不要求安装个人测试证书。安装后重新打开输入应用。缺少运行库时参考 [安装文档](docs/installation.md)。
 
 1. 阅读 [完整使用说明](使用说明.md) 与 [官方 Windows 构建说明](server/AGENTS.md)。
 2. 在自己的 MSIME 设置中填写自己的 API 配置。

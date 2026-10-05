@@ -94,7 +94,7 @@ Assert-PathExists -LiteralPath $tsf32Pdb -Description '32 位 TSF Release PDB'
 Assert-PathExists -LiteralPath $tsf64Pdb -Description '64 位 TSF Release PDB'
 $serverExecutables = @(
     Get-ChildItem -LiteralPath $serverRelease -Recurse -File -Filter '*.exe' |
-        Where-Object { $_.BaseName -notlike '*Tests' -and $_.BaseName -notlike 'test_*' }
+        Where-Object { $_.BaseName -notlike '*Tests' -and $_.BaseName -notlike 'test_*' -and $_.BaseName -notlike '*_probe' }
 )
 $missingServerPdb = @(
     $serverExecutables |
@@ -296,6 +296,8 @@ Get-ChildItem -LiteralPath $targetServer -Recurse -File -Filter '*Tests.exe' |
     Remove-Item -Force
 Get-ChildItem -LiteralPath $targetServer -Recurse -File -Filter 'test_*.exe' |
     Remove-Item -Force
+Get-ChildItem -LiteralPath $targetServer -Recurse -File |
+    Where-Object { $_.BaseName -like '*_probe' } | Remove-Item -Force
 if ($IncludeSymbols) {
     Get-ChildItem -LiteralPath $targetServer -Recurse -File -Filter '*Tests.pdb' |
         Remove-Item -Force

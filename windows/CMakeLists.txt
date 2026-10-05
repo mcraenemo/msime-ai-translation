@@ -21,6 +21,10 @@ if(MSVC)
     add_link_options("$<$<CONFIG:Release>:/DEBUG>")
 endif()
 
+if(MSVC)
+    add_link_options("/PDBALTPATH:%_PDB%")
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(test_windows_ipc_contract

@@ -1,3 +1,5 @@
+> **本社区分支**使用未签名普通权限安装包，见 [社区发布构建说明](../docs/community-release.md)。下面保留的是上游签名流程；不要将个人测试证书作为公开发行依赖。上游工作流在本仓已禁用。
+
 # Metasequoia IME Installer
 
 本目录的脚本从 Windows 合仓目录收集产物、签名、用 Inno Setup 打成安装包。它服务两条流程：

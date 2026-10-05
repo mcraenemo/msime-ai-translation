@@ -19,6 +19,8 @@ try {
         'server/build-release/bin/Release/MetasequoiaImeDictionaryReplay.pdb',
         'server/build-release/bin/Release/MetasequoiaImeServerTests.exe',
         'server/build-release/bin/Release/MetasequoiaImeServerTests.pdb',
+        'server/build-release/bin/Release/reading_selection_probe.exe',
+        'server/build-release/bin/Release/reading_selection_probe.pdb',
         'server/build-release/bin/Release/test_webview_contract.exe',
         'server/build-release/bin/Release/test_webview_contract.pdb',
         'windows/build32-release/Release/MetasequoiaImeTsf.dll',
@@ -68,6 +70,7 @@ try {
                          'THIRD_PARTY_NOTICES.txt', 'LICENSE.txt')) {
         if (-not (Test-Path (Join-Path $installer $file))) { throw "Missing packaged file: $file" }
     }
+    if (Test-Path (Join-Path $installer 'server_exe/reading_selection_probe.exe')) { throw 'Development probe must not ship' }
     # 内置皮肤清单落在数据目录的 skins 下，那是用户目录（外部皮肤也在里面），卸载时不能删；
     # 它若经 app_data 暂存，就得进 IsShippedAppDataItem 名单，卸载会把整个 skins 带走。
     if (Test-Path (Join-Path $installer 'app_data/skins')) { throw 'Default skin settings were staged under app_data' }

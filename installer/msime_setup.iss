@@ -18,9 +18,9 @@
 ; 上面两条都不把 PDB 打进包；要带符号用 .\test-symbols.ps1。
 ; 本仓库不包含任何预置代码签名证书。
 
-#define MyAppName      "Metasequoia IME 水杉输入法"
-#define MyAppVersion   "0.0.1"
-#define MyAppPublisher "Metasequoia"
+#define MyAppName      "水杉输入法 AI 翻译社区版"
+#define MyAppVersion   "0.9.5"
+#define MyAppPublisher "MetasequoiaIME 原作者团队 / mcraenemo 社区扩展"
 #define MyAppExeName   "MetasequoiaImeServer.exe"
 #define MySettingsExeName "MetasequoiaImeSettings.exe"
 ; 与 settings_app.cpp / settings_launcher.cpp 的 kQuitSettings 保持一致：WM_APP + 5。
@@ -837,6 +837,12 @@ begin
   { 标记文件也要留下。它虽然会在 ssPostInstall 重写一遍，但安装若在中途失败，
     没有它的数据目录就不再被认作我们建的，后续的清理和卸载都会跳过。}
   Result :=
+    (CompareText(FileName, 'ai-translations.db') = 0) or
+    (CompareText(FileName, 'ai-translations.db-wal') = 0) or
+    (CompareText(FileName, 'ai-translations.db-shm') = 0) or
+    (CompareText(FileName, 'ai-translations.db-journal') = 0) or
+    (CompareText(FileName, 'google-sync.json') = 0) or
+    (CompareText(FileName, 'browser-reading') = 0) or
     IsUserDatabaseFile(FileName) or
     IsUserStatisticsDatabase(FileName) or
     IsUserConfigFile(FileName) or
@@ -1352,12 +1358,21 @@ begin
     '"' + RemoveBackslashUnlessRoot(OldDir) + '" "' + RemoveBackslashUnlessRoot(NewDir) + '" ' +
     'msime_user.db msime_user.db-wal msime_user.db-shm msime_user.db-journal ' +
     'stats.db stats.db-wal stats.db-shm stats.db-journal ' +
+    'ai-translations.db ai-translations.db-wal ai-translations.db-shm ai-translations.db-journal google-sync.json ' +
     'config.toml config.base.toml /MOVE /R:2 /W:1 /NJH /NJS /NP /NFL /NDL',
     '',
     SW_HIDE,
     ewWaitUntilTerminated,
     ResultCode
   ) and (ResultCode < 8);
+
+  if DirExists(AddBackslash(OldDir) + 'browser-reading') then
+    Moved := Exec(
+      ExpandConstant('{sys}\robocopy.exe'),
+      '"' + AddBackslash(OldDir) + 'browser-reading" "' + AddBackslash(NewDir) + 'browser-reading" ' +
+      '/E /MOVE /R:2 /W:1 /NJH /NJS /NP /NFL /NDL',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode
+    ) and (ResultCode < 8) and Moved;
 
   { 外部皮肤是用户自己放进来的，同样搬走。}
   if DirExists(AddBackslash(OldDir) + 'skins') then
