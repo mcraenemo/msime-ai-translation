@@ -40,3 +40,9 @@
 - [上游 README](README.upstream.md) / [上游英文说明](README.en.md)
 
 感谢原作者团队与所有贡献者。
+
+## 2026-10-13 同步修复
+
+修复阅读翻译 `source_character_set=auto` 无法从 Google 表格重新读取的问题，并增加脱敏的 Google 错误代码、说明与请求阶段提示。旧版可能首次上传成功，下一次下载失败。OAuth Testing 七天过期属于 Google 授权规则，需重新授权。详见 [排查说明](docs/google-sync-http400.md)。
+
+此修复已更新源码；v0.9.5-community.1 安装包仍是原发布版本，尚未包含本次补丁。

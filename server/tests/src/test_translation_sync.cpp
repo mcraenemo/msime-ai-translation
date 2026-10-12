@@ -1,4 +1,5 @@
 #include "ai/translation_sync.h"
+#include "ai/google_api_error.h"
 #include "tests/includes/test_framework.h"
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -96,6 +97,30 @@ TEST_CASE(translation_sync_upload_once_no_whole_sheet_overwrite)
     Synchronize(f.path, f.Api());
     REQUIRE_EQ(f.writes, 1);
     REQUIRE_EQ(f.Text(), Sample().text);
+}
+TEST_CASE(translation_sync_reading_auto_charset_roundtrip_and_manual_edit)
+{
+    REQUIRE(ValidSourceCharacterSet("auto"));
+    REQUIRE(!ValidSourceCharacterSet("unknown"));
+    Fixture f;
+    auto reading = Sample();
+    reading.source = "I have to work tomorrow.";
+    reading.language = "zh-Hans";
+    reading.charset = "auto";
+    f.Save(reading);
+    Synchronize(f.path, f.Api());
+    REQUIRE_EQ(f.cloud.size(), size_t(1));
+    REQUIRE_EQ(f.cloud[0].record.charset, "auto");
+    REQUIRE_EQ(Record::Parse(f.cloud[0].record.Json()).Id(), reading.Id());
+    f.cloud[0].record.text = "Manual reading translation";
+    f.cloud[0].raw = f.cloud[0].record.Json();
+    Synchronize(f.path, f.Api());
+    REQUIRE_EQ(f.Text(), "Manual reading translation");
+    REQUIRE_EQ(f.cloud[0].record.origin, "user");
+    const int writes = f.writes;
+    Synchronize(f.path, f.Api());
+    REQUIRE_EQ(f.writes, writes);
+    REQUIRE_EQ(f.cloud.size(), size_t(1));
 }
 TEST_CASE(translation_sync_manual_cloud_edit_without_timestamp_wins)
 {
@@ -258,4 +283,19 @@ TEST_CASE(translation_sync_daily_once_disabled_and_restart)
     REQUIRE(!DailyDue(false, 0, now));
     REQUIRE(!DailyDue(true, now, now + 60));
     REQUIRE(DailyDue(true, now, now + 86400));
+}
+
+TEST_CASE(google_errors_identify_refresh_and_preserve_privacy)
+{
+    auto e = TranslationSync::GoogleApiError(
+        400, "OAuth Token 刷新",
+        {{"error", "invalid_grant"}, {"error_description", "Token has been expired or revoked."}}, {});
+    REQUIRE(e.find("invalid_grant") != std::string::npos);
+    REQUIRE(e.find("Token has been expired or revoked.") != std::string::npos);
+    auto redacted = TranslationSync::GoogleApiError(
+        400, "Sheets 增量写入",
+        {{"error", {{"status", "INVALID_ARGUMENT"}, {"message", "rejected synthetic-token-value"}}}},
+        {"synthetic-token-value"});
+    REQUIRE(redacted.find("synthetic-token-value") == std::string::npos);
+    REQUIRE(redacted.find("INVALID_ARGUMENT") != std::string::npos);
 }

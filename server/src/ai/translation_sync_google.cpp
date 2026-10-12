@@ -8,6 +8,7 @@
 #include <shellapi.h>
 #include <bcrypt.h>
 #include "translation_sync.h"
+#include "google_api_error.h"
 #include "ai_translation_language.h"
 #include <curl/curl.h>
 #include <algorithm>
@@ -155,18 +156,41 @@ J Http(const std::string &url, const std::string &method, const std::string &bod
     const auto rc = curl_easy_perform(c.get());
     long status = 0;
     curl_easy_getinfo(c.get(), CURLINFO_RESPONSE_CODE, &status);
-    // 不回显 Google 响应、请求、授权码或 Token；仅给出可操作的固定错误。
+    const std::string stage =
+        form ? (body.find("grant_type=refresh_token") != std::string::npos ? "OAuth Token 刷新" : "OAuth 授权交换")
+             : (url.find(":batchUpdate") != std::string::npos
+                    ? "Sheets 增量写入"
+                    : (url.find("/values/") != std::string::npos ? "Sheets 读取单元格" : "Sheets 读取表格信息"));
     if (rc != CURLE_OK)
-        throw std::runtime_error("Google 网络失败或超时，本地翻译不受影响");
-    if (status == 401)
-        throw std::runtime_error("Google 授权失效，请重新授权");
-    if (status == 403)
-        throw std::runtime_error("Google 拒绝访问：请启用 Sheets API 并使用拥有该表的账号授权");
-    if (status == 429)
-        throw std::runtime_error("Google 请求限额，请稍后同步");
+        throw std::runtime_error("Google " + stage + "网络失败或超时，本地翻译不受影响");
     if (status < 200 || status >= 300)
-        throw std::runtime_error("Google 请求失败（HTTP " + std::to_string(status) +
-                                 "），请检查 OAuth 授权和 API 配置");
+    {
+        std::vector<std::string> sensitive{bearer};
+        const auto credentials = Credentials();
+        for (const auto &value : credentials)
+            if (value.is_string())
+                sensitive.push_back(value.get<std::string>());
+        if (form)
+        {
+            size_t start = 0;
+            while (start < body.size())
+            {
+                auto end = body.find('&', start);
+                auto pair = body.substr(start, end == std::string::npos ? end : end - start);
+                auto equals = pair.find('=');
+                if (equals != std::string::npos)
+                {
+                    sensitive.push_back(pair.substr(equals + 1));
+                    sensitive.push_back(Decode(pair.substr(equals + 1)));
+                }
+                if (end == std::string::npos)
+                    break;
+                start = end + 1;
+            }
+        }
+        auto error = J::parse(transfer.body, nullptr, false);
+        throw std::runtime_error(GoogleApiError(status, stage, error, std::move(sensitive)));
+    }
     auto result = J::parse(transfer.body, nullptr, false);
     if (result.is_discarded())
         throw std::runtime_error("Google 返回无效数据");
@@ -361,8 +385,8 @@ std::vector<RemoteRow> Read(const std::string &token, const std::atomic<bool> &s
             auto charset = Cell(row, 6);
             if (charset.empty())
                 charset = "simplified";
-            if (charset != "simplified" && charset != "traditional")
-                throw std::runtime_error("表格简繁字段请使用 simplified 或 traditional");
+            if (!ValidSourceCharacterSet(charset))
+                throw std::runtime_error("表格源文字类型请使用 simplified、traditional 或 auto（自动识别）");
             Record r{source,
                      language,
                      text,

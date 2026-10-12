@@ -8,6 +8,10 @@
 
 namespace TranslationSync
 {
+inline bool ValidSourceCharacterSet(const std::string &value)
+{
+    return value == "simplified" || value == "traditional" || value == "auto";
+}
 std::string SpreadsheetId();
 struct Record
 {
